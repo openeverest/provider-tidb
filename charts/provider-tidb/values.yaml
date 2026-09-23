@@ -133,6 +133,23 @@ operator:
   # -- Install the bundled TiDB Operator (its CRDs are applied by the operator at startup).
   enabled: true
 
+# TiDB Operator CRDs. They are ~15 MB — too large to ship inside the Helm
+# release (Helm stores the whole chart in the release Secret, which would exceed
+# the API server's request-size limit). A pre-install/pre-upgrade hook Job
+# applies the pinned CRD manifest from the network before the operator and
+# provider start. Requires cluster egress to `url`.
+crds:
+  # -- Install the TiDB CRDs via a pre-install hook (needs egress to `url`).
+  # Set to false for air-gapped clusters or to manage the CRDs yourself; then
+  # apply them manually before install: kubectl apply --server-side -f <url>.
+  install: true
+  # -- Version-matched combined CRD manifest applied by the hook.
+  url: https://github.com/pingcap/tidb-operator/releases/download/v2.0.1/tidb-operator.crds.yaml
+  # -- Image providing `kubectl` for the install hook.
+  image: registry.k8s.io/kubectl:v1.32.0
+  # -- Job backoff limit for the install hook.
+  backoffLimit: 3
+
 # -- Default instance presets configuration
 # Each preset must have 'name', 'enabled', and 'spec' fields.
 # The 'spec' field contains the full InstancePresetSpec.

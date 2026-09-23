@@ -18,3 +18,10 @@
 
 NOTE: Ensure that the following prerequisites are installed in your cluster:
   - OpenEverest CRDs (Instances, Providers)
+{{- if not .Values.crds.install }}
+
+WARNING: crds.install=false — the TiDB Operator CRDs were NOT installed by this
+chart. Install them yourself BEFORE the operator/provider start, e.g.:
+  kubectl apply --server-side -f {{ .Values.crds.url }}
+(server-side apply is required — the CRD schemas exceed the client-side limit.)
+{{- end }}
