@@ -1,0 +1,65 @@
+# Expected outcome of create-instance: the provider reconciles the Instance into
+# a TiDB Operator v2 Cluster plus one group per component, all named after the
+# Instance and referencing the shared Cluster. Chainsaw asserts are partial.
+apiVersion: core.pingcap.com/v1alpha1
+kind: Cluster
+metadata:
+  name: test-instance
+spec:
+  bootstrapSQL:
+    name: test-instance-tidb-bootstrap-sql
+---
+apiVersion: core.pingcap.com/v1alpha1
+kind: PDGroup
+metadata:
+  name: test-instance
+spec:
+  cluster:
+    name: test-instance
+  replicas: 1
+  template:
+    spec:
+      version: v8.5.2
+      volumes:
+        - name: data
+          storage: 10Gi
+---
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiKVGroup
+metadata:
+  name: test-instance
+spec:
+  cluster:
+    name: test-instance
+  replicas: 1
+  template:
+    spec:
+      version: v8.5.2
+      volumes:
+        - name: data
+          storage: 20Gi
+---
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiDBGroup
+metadata:
+  name: test-instance
+spec:
+  cluster:
+    name: test-instance
+  replicas: 1
+  template:
+    spec:
+      version: v8.5.2
+---
+# The provider generates a random root password and the bootstrap SQL that
+# applies it on first cluster bootstrap.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-instance-tidb-root
+type: Opaque
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-instance-tidb-bootstrap-sql

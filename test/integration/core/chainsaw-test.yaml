@@ -1,0 +1,75 @@
+---
+# Core lifecycle suite: create an Instance, verify the provider produces the
+# TiDB Operator v2 CRs, simulate the operator marking the groups ready, verify
+# the Instance reports Ready, then delete.
+#
+# The TiDB operator itself is NOT deployed here — the provider is exercised in
+# isolation and group readiness is simulated by patching group status.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: core
+spec:
+  description: |
+    Lifecycle of an Instance: create, simulate operator readiness, and delete.
+
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup -o yaml
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/name=provider-tidb
+        tail: 100
+
+  steps:
+    - name: provider-deployed
+      try:
+        - assert:
+            file: 00-assert.yaml
+
+    - name: create-instance
+      try:
+        - apply:
+            file: 10-create-instance.yaml
+        - assert:
+            file: 10-assert.yaml
+
+    - name: instance-ready
+      try:
+        # No operator is running, so simulate it by marking each group's desired
+        # replicas as ready. The group status schema requires the full replica
+        # counters and a selector. The provider watches the groups and recomputes
+        # the Instance status.
+        - script:
+            content: |
+              set -e
+              for g in pdgroup tikvgroup tidbgroup; do
+                kubectl -n $NAMESPACE patch $g/test-instance --subresource status --type merge \
+                  -p '{"status":{"replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=test-instance"}}'
+              done
+        - assert:
+            file: 11-assert.yaml
+        # The runtime writes the provider's connection details (including the
+        # generated root password) into <instance>-conn.
+        - script:
+            content: |
+              set -e
+              pw=$(kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath='{.data.password}' | base64 -d)
+              test -n "$pw" || { echo "connection secret has empty password"; exit 1; }
+              echo "connection secret password length: ${#pw}"
+
+    - name: delete-instance
+      try:
+        - delete:
+            ref:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              name: test-instance
+        - wait:
+            apiVersion: core.openeverest.io/v1alpha1
+            kind: Instance
+            name: test-instance
+            for:
+              deletion: {}

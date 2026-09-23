@@ -1,0 +1,26 @@
+# Minimal Instance CR — smallest viable TiDB cluster (single node per component).
+# Suitable for local development only; not a production layout.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: tidb-simple
+spec:
+  providerRef:
+    name: tidb
+  version: "8.5.2"
+  topology:
+    type: cluster
+  components:
+    pd:
+      type: pd
+      replicas: 1
+      storage:
+        size: 10Gi
+    tikv:
+      type: tikv
+      replicas: 1
+      storage:
+        size: 20Gi
+    tidb:
+      type: tidb
+      replicas: 1

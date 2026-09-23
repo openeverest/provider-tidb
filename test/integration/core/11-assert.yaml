@@ -1,0 +1,8 @@
+# Once every group reports its desired replicas ready, the provider's Status()
+# must surface phase Ready on the Instance.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+status:
+  phase: Ready

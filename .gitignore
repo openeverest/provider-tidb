@@ -1,0 +1,36 @@
+# generated binaries
+bin/
+
+# Go build cache
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Go coverage
+cover.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# env file
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Helm chart dependencies (downloaded by `helm dep up`)
+charts/provider-tidb/charts/
+charts/provider-tidb/Chart.lock

@@ -1,0 +1,43 @@
+# Component type version catalog.
+# Each component type (pd, tikv, tidb) tracks the same TiDB release; the image
+# tag equals the version. Mark exactly one version per type as `default: true`.
+#
+# The top-level `versions:` bundles are what a user selects via
+# Instance.spec.version; the runtime resolves a bundle into per-component
+# versions before Sync runs.
+
+componentTypes:
+    pd:
+        versions:
+            - version: v8.5.2
+              image: pingcap/pd:v8.5.2
+              default: true
+            - version: v7.5.5
+              image: pingcap/pd:v7.5.5
+    tikv:
+        versions:
+            - version: v8.5.2
+              image: pingcap/tikv:v8.5.2
+              default: true
+            - version: v7.5.5
+              image: pingcap/tikv:v7.5.5
+    tidb:
+        versions:
+            - version: v8.5.2
+              image: pingcap/tidb:v8.5.2
+              default: true
+            - version: v7.5.5
+              image: pingcap/tidb:v7.5.5
+
+versions:
+    - name: "8.5.2"
+      default: true
+      components:
+          pd: v8.5.2
+          tikv: v8.5.2
+          tidb: v8.5.2
+    - name: "7.5.5"
+      components:
+          pd: v7.5.5
+          tikv: v7.5.5
+          tidb: v7.5.5

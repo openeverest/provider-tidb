@@ -1,0 +1,44 @@
+# Example Instance CR for the provider-tidb provider.
+# Apply this to your cluster to create a TiDB cluster.
+#
+# Prerequisites:
+#   1. OpenEverest CRDs installed
+#   2. Provider CR applied (installed by the provider Helm chart)
+#   3. TiDB Operator v2 running
+#   4. Provider controller running
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: example-tidb
+spec:
+  providerRef:
+    name: tidb
+  version: "8.5.2"
+  topology:
+    type: cluster
+  components:
+    pd:
+      type: pd
+      replicas: 3
+      resources:
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      storage:
+        size: 20Gi
+    tikv:
+      type: tikv
+      replicas: 3
+      resources:
+        limits:
+          cpu: "2"
+          memory: 4Gi
+      storage:
+        size: 50Gi
+    tidb:
+      type: tidb
+      replicas: 2
+      resources:
+        limits:
+          cpu: "2"
+          memory: 4Gi

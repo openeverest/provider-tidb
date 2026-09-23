@@ -1,0 +1,300 @@
+# Cluster topology: the standard distributed TiDB deployment.
+# A cluster is composed of three mandatory components, each reconciled into its
+# own TiDB Operator v2 group CR:
+#   pd   -> PDGroup    (Placement Driver: metadata, TSO, scheduling)
+#   tikv -> TiKVGroup  (distributed KV storage engine)
+#   tidb -> TiDBGroup  (stateless SQL layer, MySQL protocol)
+#
+# This file defines both the structural topology (config) and its UI rendering.
+
+config:
+  components:
+    tidb:
+      defaults:
+        replicas: 2
+      # Stateless SQL layer: no storage. Declared fields are exactly what Sync
+      # reads off the component spec.
+      supportedFields:
+        properties:
+          resources: {}
+          replicas: {minimum: 1}
+    tikv:
+      defaults:
+        replicas: 3
+      supportedFields:
+        required: [storage]
+        properties:
+          storage: {}
+          resources: {}
+          replicas: {minimum: 1}
+    pd:
+      defaults:
+        replicas: 3
+      supportedFields:
+        required: [storage]
+        properties:
+          storage: {}
+          resources: {}
+          replicas: {minimum: 1}
+
+ui:
+  sections:
+    databaseVersion:
+      label: "Database Version"
+      description: "Select the TiDB version for this cluster."
+      components:
+        version:
+          uiType: select
+          path: spec.version
+          fieldParams:
+            label: "Database Version"
+            optionsPath: spec.versions
+            optionsPathConfig:
+              labelPath: "name"
+              valuePath: "name"
+            modes:
+              edit:
+                disabled: true
+              restore:
+                disabled: true
+          validation:
+            required: true
+    tidb:
+      label: "SQL Layer (TiDB)"
+      description: "Stateless SQL nodes that speak the MySQL protocol."
+      components:
+        tidbGroup:
+          uiType: group
+          components:
+            replicas:
+              path: "spec.components.tidb.replicas"
+              uiType: number
+              fieldParams:
+                label: "Number of TiDB nodes"
+                defaultValue: 2
+              validation:
+                required: true
+                min: 1
+                int: true
+            resources:
+              uiType: group
+              groupType: line
+              components:
+                cpu:
+                  path: "spec.components.tidb.resources.limits.cpu"
+                  uiType: number
+                  fieldParams:
+                    label: "CPU"
+                    defaultValue: 1
+                    step: 1
+                  validation:
+                    min: 0.5
+                    required: true
+                memory:
+                  path: "spec.components.tidb.resources.limits.memory"
+                  uiType: number
+                  fieldParams:
+                    label: "Memory"
+                    defaultValue: 2
+                    step: 0.1
+                    badge: "Gi"
+                    badgeToApi: true
+                  validation:
+                    min: 0.5
+                    required: true
+          componentsOrder:
+            - replicas
+            - resources
+    tikv:
+      label: "Storage Layer (TiKV)"
+      description: "Distributed key-value storage nodes."
+      components:
+        tikvGroup:
+          uiType: group
+          components:
+            replicas:
+              path: "spec.components.tikv.replicas"
+              uiType: number
+              fieldParams:
+                label: "Number of TiKV nodes"
+                defaultValue: 3
+              validation:
+                required: true
+                min: 1
+                int: true
+            resources:
+              uiType: group
+              groupType: line
+              components:
+                cpu:
+                  path: "spec.components.tikv.resources.limits.cpu"
+                  uiType: number
+                  fieldParams:
+                    label: "CPU"
+                    defaultValue: 1
+                    step: 1
+                  validation:
+                    min: 0.5
+                    required: true
+                memory:
+                  path: "spec.components.tikv.resources.limits.memory"
+                  uiType: number
+                  fieldParams:
+                    label: "Memory"
+                    defaultValue: 2
+                    step: 0.1
+                    badge: "Gi"
+                    badgeToApi: true
+                  validation:
+                    min: 0.5
+                    required: true
+                disk:
+                  path: "spec.components.tikv.storage.size"
+                  uiType: number
+                  fieldParams:
+                    label: "Disk"
+                    defaultValue: 25
+                    badge: "Gi"
+                    badgeToApi: true
+                  validation:
+                    min: 1
+                    int: true
+                    required: true
+                    modes:
+                      edit:
+                        celExpressions:
+                          - celExpr: "spec.components.tikv.storage.size >= original.spec.components.tikv.storage.size"
+                            message: "Disk size cannot be decreased"
+          componentsOrder:
+            - replicas
+            - resources
+    pd:
+      label: "Placement Driver (PD)"
+      description: "Metadata, timestamp and scheduling nodes. Use an odd number for quorum."
+      components:
+        pdGroup:
+          uiType: group
+          components:
+            replicas:
+              path: "spec.components.pd.replicas"
+              uiType: number
+              fieldParams:
+                label: "Number of PD nodes"
+                defaultValue: 3
+              validation:
+                required: true
+                min: 1
+                int: true
+                celExpressions:
+                  - celExpr: "spec.components.pd.replicas % 2 == 1"
+                    message: "The number of PD nodes must be odd"
+            resources:
+              uiType: group
+              groupType: line
+              components:
+                cpu:
+                  path: "spec.components.pd.resources.limits.cpu"
+                  uiType: number
+                  fieldParams:
+                    label: "CPU"
+                    defaultValue: 1
+                    step: 1
+                  validation:
+                    min: 0.5
+                    required: true
+                memory:
+                  path: "spec.components.pd.resources.limits.memory"
+                  uiType: number
+                  fieldParams:
+                    label: "Memory"
+                    defaultValue: 2
+                    step: 0.1
+                    badge: "Gi"
+                    badgeToApi: true
+                  validation:
+                    min: 0.5
+                    required: true
+                disk:
+                  path: "spec.components.pd.storage.size"
+                  uiType: number
+                  fieldParams:
+                    label: "Disk"
+                    defaultValue: 20
+                    badge: "Gi"
+                    badgeToApi: true
+                  validation:
+                    min: 1
+                    int: true
+                    required: true
+                    modes:
+                      edit:
+                        celExpressions:
+                          - celExpr: "spec.components.pd.storage.size >= original.spec.components.pd.storage.size"
+                            message: "Disk size cannot be decreased"
+          componentsOrder:
+            - replicas
+            - resources
+    advanced:
+      label: "Advanced configuration"
+      description: "Storage classes and per-component configuration overrides."
+      components:
+        tikvStorageClass:
+          uiType: select
+          path: spec.components.tikv.storage.storageClass
+          fieldParams:
+            label: "TiKV storage class"
+            modes:
+              edit:
+                disabled: true
+              restore:
+                disabled: true
+          dataSource:
+            provider: storageClasses
+        pdStorageClass:
+          uiType: select
+          path: spec.components.pd.storage.storageClass
+          fieldParams:
+            label: "PD storage class"
+            modes:
+              edit:
+                disabled: true
+              restore:
+                disabled: true
+          dataSource:
+            provider: storageClasses
+        tidbConfig:
+          uiType: text
+          path: spec.components.tidb.parameters.config
+          fieldParams:
+            label: "TiDB configuration (TOML)"
+            multiline: true
+            minRows: 3
+            maxRows: 8
+        tikvConfig:
+          uiType: text
+          path: spec.components.tikv.parameters.config
+          fieldParams:
+            label: "TiKV configuration (TOML)"
+            multiline: true
+            minRows: 3
+            maxRows: 8
+        pdConfig:
+          uiType: text
+          path: spec.components.pd.parameters.config
+          fieldParams:
+            label: "PD configuration (TOML)"
+            multiline: true
+            minRows: 3
+            maxRows: 8
+      componentsOrder:
+        - tikvStorageClass
+        - pdStorageClass
+        - tidbConfig
+        - tikvConfig
+        - pdConfig
+  sectionsOrder:
+    - databaseVersion
+    - tidb
+    - tikv
+    - pd
+    - advanced

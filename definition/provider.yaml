@@ -1,0 +1,15 @@
+# Provider identity and component definitions.
+# Edit this file to add or remove components.
+# Run `make generate` after making changes.
+
+components:
+    pd:
+        type: pd
+        parametersSchema: PdParameters
+    tidb:
+        type: tidb
+        parametersSchema: TidbParameters
+    tikv:
+        type: tikv
+        parametersSchema: TikvParameters
+name: tidb

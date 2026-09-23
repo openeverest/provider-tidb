@@ -1,0 +1,26 @@
+# Instance applied by the create-instance step. Single node per component for a
+# fast lifecycle test (PD replicas must be odd; 1 is valid).
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  providerRef:
+    name: tidb
+  version: "8.5.2"
+  topology:
+    type: cluster
+  components:
+    pd:
+      type: pd
+      replicas: 1
+      storage:
+        size: 10Gi
+    tikv:
+      type: tikv
+      replicas: 1
+      storage:
+        size: 20Gi
+    tidb:
+      type: tidb
+      replicas: 1
