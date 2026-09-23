@@ -185,6 +185,7 @@ deploy-provider-ci: helm-deps ## Deploy the provider via Helm for CI (IMG must a
 		--set image.tag=$(_IMG_TAG) \
 		--set image.pullPolicy=Never \
 		--set operator.enabled=false \
+		--set crds.install=false \
 		--wait --timeout 2m
 	# The bundled TiDB Operator is disabled for integration tests — CRDs are
 	# installed via `make install-crds` and operator behaviour is simulated by

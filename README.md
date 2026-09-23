@@ -102,8 +102,11 @@ The chart is self-contained:
 
 - **TiDB Operator v2 is bundled** as a chart dependency and installed automatically. Disable it
   with `--set operator.enabled=false` to run against an externally managed operator.
-- **The TiDB CRDs are shipped in the chart** (`charts/provider-tidb/crds/`) and installed before
-  the operator, which requires them to be present at startup.
+- **The TiDB CRDs are installed by a pre-install hook.** They are ~15 MB — too large to ship
+  inside the Helm release — so a `Job` applies the pinned CRD manifest from the operator's GitHub
+  release before the operator and provider start. This requires cluster egress to that URL; point
+  `--set crds.url=...` at a mirror for air-gapped clusters, or `--set crds.install=false` to manage
+  the CRDs yourself.
 
 Upgrade and uninstall:
 
@@ -114,6 +117,23 @@ helm uninstall provider-tidb --namespace everest-system
 
 Uninstalling the chart does **not** delete running `Instance` resources, the TiDB CRDs, or any
 data.
+
+### Air-gapped installs
+
+Set `--set crds.install=false` to skip the CRD network pull entirely, then install the CRDs
+yourself first (server-side apply is required — the schemas exceed the client-side limit):
+
+```bash
+# From your own mirror of the pinned manifest:
+kubectl apply --server-side -f tidb-operator.crds.yaml
+
+helm install provider-tidb oci://ghcr.io/openeverest/charts/provider-tidb \
+  --version <chart-version> --namespace everest-system \
+  --set crds.install=false
+```
+
+Alternatively keep the hook and only repoint it at an internal mirror with
+`--set crds.url=https://mirror.internal/tidb-operator.crds.yaml`.
 
 ## Usage
 
@@ -261,7 +281,7 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 | `Instance` stuck in `Provisioning` | `kubectl describe instances.core.openeverest.io <name>` conditions, then the provider logs |
 | No `Provider` resource in the cluster | Is the chart installed? Check the provider deployment logs |
 | `Instance` ignored entirely | `spec.providerRef.name` must be `tidb` |
-| Provider logs `no matches for kind "TiKVGroup"` | TiDB CRDs missing. Fresh chart installs ship them under `crds/`; if you upgraded an older release, apply them: `kubectl apply --server-side -f charts/provider-tidb/crds/` |
+| Provider logs `no matches for kind "TiKVGroup"` | TiDB CRDs missing. The chart's pre-install hook installs them; check the `<release>-crd-installer` Job (and its egress to `crds.url`), or apply them manually: `kubectl apply --server-side -f <crds.url>` |
 | Operator pod `CrashLoopBackOff` at startup | The TiDB CRDs must exist before the operator starts (see the row above) |
 | Groups created but no pods | Inspect the group/instance status (`kubectl get tidbgroup,tikvgroup,pdgroup`) — the failure is upstream in the operator |
 

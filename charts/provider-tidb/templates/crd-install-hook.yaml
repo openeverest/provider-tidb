@@ -1,0 +1,103 @@
+{{- if .Values.crds.install -}}
+{{- /*
+The TiDB Operator CRDs are too large (~15 MB) to ship inside the Helm release —
+Helm stores the whole chart in the release Secret, which would exceed the API
+server's request-size limit. Instead a pre-install/pre-upgrade hook Job applies
+the pinned, version-matched CRD manifest from the network before the operator
+and provider start. Requires cluster egress to .Values.crds.url.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "provider-tidb.fullname" . }}-crd-installer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provider-tidb.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "provider-tidb.fullname" . }}-crd-installer
+  labels:
+    {{- include "provider-tidb.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "create", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "provider-tidb.fullname" . }}-crd-installer
+  labels:
+    {{- include "provider-tidb.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "provider-tidb.fullname" . }}-crd-installer
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "provider-tidb.fullname" . }}-crd-installer
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "provider-tidb.fullname" . }}-crd-installer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "provider-tidb.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.crds.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "provider-tidb.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: crd-installer
+    spec:
+      serviceAccountName: {{ include "provider-tidb.fullname" . }}-crd-installer
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: crd-installer
+          image: {{ .Values.crds.image }}
+          # kubectl fetches the URL itself; server-side apply is required
+          # because the CRD schemas exceed the client-side apply annotation limit.
+          command:
+            - kubectl
+            - apply
+            - --server-side
+            - --force-conflicts
+            - -f
+            - {{ .Values.crds.url | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+{{- end }}
