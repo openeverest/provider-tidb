@@ -16,6 +16,12 @@ options:
   k3d:
     wait: true
     disableLoadbalancer: true
+  # TiKV exits at startup unless it can open >= 82920 files; CI runners default to 65536.
+  runtime:
+    ulimits:
+      - name: nofile
+        soft: 1048576
+        hard: 1048576
   k3s:
     extraArgs:
       - arg: "--disable=traefik,metrics-server,servicelb"
