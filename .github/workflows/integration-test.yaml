@@ -27,6 +27,10 @@ on:
         description: 'Human-readable suite name used for artifact naming'
         type: string
         required: true
+      deploy_target:
+        description: 'Make target that deploys the provider (deploy-provider-e2e also installs the real TiDB Operator)'
+        type: string
+        default: deploy-provider-ci
 
 permissions:
   contents: read
@@ -86,7 +90,7 @@ jobs:
           OPENEVEREST_BRANCH: ${{ env.OPENEVEREST_BRANCH }}
 
       - name: Deploy provider
-        run: make deploy-provider-ci
+        run: make ${{ inputs.deploy_target }}
 
       - name: Deploy OpenEverest controller
         working-directory: _openeverest
@@ -100,6 +104,15 @@ jobs:
         run: make ${{ inputs.make_target }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dump runner diagnostics on failure
+        if: failure()
+        run: |
+          df -h
+          free -m
+          for n in $(docker ps --filter name=k3d- --format '{{.Names}}'); do
+            echo "== $n nofile soft/hard:"; docker exec "$n" sh -c 'ulimit -Sn; ulimit -Hn' || true
+          done
 
       - name: Upload chainsaw report on failure
         if: failure()

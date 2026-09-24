@@ -44,13 +44,14 @@ spec:
           command:
             - /bin/sh
             - -c
-            - mkdir -p /data/backups
+            - mkdir -p /data/backups && chown -R 65532:65532 /data
           volumeMounts:
             - mountPath: /data
               name: minio-data-vol
       containers:
         - name: minio
-          image: quay.io/minio/minio:latest
+          # quay.io/minio/minio and docker.io/minio/minio are no longer publicly pullable.
+          image: cgr.dev/chainguard/minio:latest
           args:
             - server
             - /data

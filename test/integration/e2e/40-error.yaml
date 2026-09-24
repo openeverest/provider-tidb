@@ -1,0 +1,6 @@
+# Deleting the Instance must tear down every pod of the TiDB cluster.
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    pingcap.com/cluster: test-instance

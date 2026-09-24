@@ -1,0 +1,33 @@
+# The operator runs one Ready pod per component instance.
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    pingcap.com/cluster: test-instance
+    pingcap.com/component: pd
+status:
+  phase: Running
+  (conditions[?type == 'Ready']):
+    - status: "True"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    pingcap.com/cluster: test-instance
+    pingcap.com/component: tikv
+status:
+  phase: Running
+  (conditions[?type == 'Ready']):
+    - status: "True"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    pingcap.com/cluster: test-instance
+    pingcap.com/component: tidb
+status:
+  phase: Running
+  (conditions[?type == 'Ready']):
+    - status: "True"
