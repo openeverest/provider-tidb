@@ -149,6 +149,10 @@ test-integration: ## Run all integration tests against the current cluster.
 test-integration-core: ## Run core integration tests.
 	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/core
 
+.PHONY: test-integration-e2e
+test-integration-e2e: ## Run end-to-end tests against the real TiDB Operator (see deploy-provider-e2e).
+	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/e2e
+
 .PHONY: load-image
 load-image: ## Import the provider image (IMG) into the k3d cluster.
 	k3d image import ${IMG} -c ${K3D_CLUSTER_NAME}
@@ -190,6 +194,16 @@ deploy-provider-ci: helm-deps ## Deploy the provider via Helm for CI (IMG must a
 	# The bundled TiDB Operator is disabled for integration tests — CRDs are
 	# installed via `make install-crds` and operator behaviour is simulated by
 	# patching group statuses directly.
+
+.PHONY: deploy-provider-e2e
+deploy-provider-e2e: helm-deps ## Deploy the provider with the bundled TiDB Operator and its CRDs (IMG must already be imported into k3d).
+	helm upgrade --install provider-tidb $(CHART_DIR) \
+		--create-namespace \
+		--namespace provider-system \
+		--set image.repository=$(_IMG_REPO) \
+		--set image.tag=$(_IMG_TAG) \
+		--set image.pullPolicy=Never \
+		--wait --timeout 10m
 
 ##@ Local Development Cluster
 

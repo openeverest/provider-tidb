@@ -103,3 +103,13 @@ jobs:
       make_target: test-integration-core
       suite: core
     secrets: inherit
+
+  test-integration-e2e:
+    name: Integration / e2e
+    needs: [lint, build, verify]
+    uses: ./.github/workflows/integration-test.yaml
+    with:
+      make_target: test-integration-e2e
+      suite: e2e
+      deploy_target: deploy-provider-e2e
+    secrets: inherit

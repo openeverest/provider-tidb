@@ -1,0 +1,39 @@
+# One-shot MySQL client that authenticates with the credentials the provider
+# published in <instance>-conn and requires `SELECT 1` to return 1.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sql-client
+  labels:
+    app.kubernetes.io/name: sql-client
+spec:
+  restartPolicy: Never
+  containers:
+    - name: mysql
+      image: mysql:8.4
+      command:
+        - sh
+        - -c
+        - test "$(mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s -e 'SELECT 1')" = "1"
+      env:
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: test-instance-conn
+              key: host
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: test-instance-conn
+              key: port
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: test-instance-conn
+              key: username
+        # Read by the mysql client, keeping the password off the command line.
+        - name: MYSQL_PWD
+          valueFrom:
+            secretKeyRef:
+              name: test-instance-conn
+              key: password

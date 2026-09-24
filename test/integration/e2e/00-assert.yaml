@@ -1,0 +1,17 @@
+# The provider and the bundled TiDB Operator must both be running
+# (see the deploy-provider-e2e Make target).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provider-tidb
+  namespace: provider-system
+status:
+  readyReplicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tidb-operator
+  namespace: provider-system
+status:
+  readyReplicas: 1

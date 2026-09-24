@@ -22,6 +22,7 @@ test/
       chainsaw-test.yaml       # Test definition: ordered steps
       00-assert.yaml           # Step files, prefixed by execution order
       ...
+    e2e/                       # Real TiDB Operator provisioning actual pods
 ```
 
 Each suite is a directory containing one `chainsaw-test.yaml` plus the
@@ -61,6 +62,16 @@ Then:
 ```bash
 make test-integration        # all suites
 make test-integration-core   # just the core suite
+```
+
+The `e2e/` suite is the exception to "simulate the operator": it deploys the
+provider **with** the bundled TiDB Operator and CRD install hook, waits for real
+PD/TiKV/TiDB pods, runs `SELECT 1` using the `<instance>-conn` credentials, and
+verifies deletion removes the pods. It needs a different deployment than `core/`:
+
+```bash
+make deploy-provider-e2e
+make test-integration-e2e
 ```
 
 ## Running in CI

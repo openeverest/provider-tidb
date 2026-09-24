@@ -1,0 +1,80 @@
+---
+# End-to-end suite: the real TiDB Operator v2 provisions an actual TiDB cluster
+# from an Instance. Requires the provider deployed WITH the bundled operator and
+# its CRDs (see the deploy-provider-e2e Make target).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: e2e
+spec:
+  description: |
+    Create an Instance, wait for the operator to bring up PD/TiKV/TiDB pods,
+    run SELECT 1 with the connection-secret credentials, then delete.
+
+  # Image pulls and first cluster bootstrap take minutes, not seconds.
+  timeouts:
+    assert: 15m
+    error: 5m
+    delete: 5m
+    cleanup: 5m
+
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,pd,tikv,tidb -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get pods,pvc,events -o wide
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/name=provider-tidb
+        tail: 100
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/component=tidb-operator
+        tail: 100
+    - podLogs:
+        selector: app.kubernetes.io/name=sql-client
+        tail: 50
+
+  steps:
+    - name: operator-and-provider-deployed
+      try:
+        - assert:
+            file: 00-assert.yaml
+
+    - name: create-instance
+      try:
+        - apply:
+            file: ../core/10-create-instance.yaml
+
+    - name: cluster-ready
+      try:
+        - assert:
+            file: 20-assert.yaml
+        - assert:
+            file: ../core/11-assert.yaml
+
+    - name: sql-connect
+      try:
+        - apply:
+            file: 30-sql-client.yaml
+        - assert:
+            timeout: 3m
+            file: 30-assert.yaml
+
+    - name: delete-instance
+      try:
+        - delete:
+            ref:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              name: test-instance
+        - wait:
+            apiVersion: core.openeverest.io/v1alpha1
+            kind: Instance
+            name: test-instance
+            for:
+              deletion: {}
+        - error:
+            file: 40-error.yaml
