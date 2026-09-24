@@ -38,16 +38,16 @@ spec:
 
     - name: instance-ready
       try:
-        # No operator is running, so simulate it by marking each group's desired
-        # replicas as ready. The group status schema requires the full replica
-        # counters and a selector. The provider watches the groups and recomputes
-        # the Instance status.
+        # No operator is running, so simulate it by marking each group converged:
+        # desired replicas ready at the spec version. The group status schema
+        # requires the full replica counters and a selector. The provider watches
+        # the groups and recomputes the Instance status.
         - script:
             content: |
               set -e
               for g in pdgroup tikvgroup tidbgroup; do
                 kubectl -n $NAMESPACE patch $g/test-instance --subresource status --type merge \
-                  -p '{"status":{"replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=test-instance"}}'
+                  -p '{"status":{"version":"v8.5.2","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=test-instance"}}'
               done
         - assert:
             file: 11-assert.yaml
@@ -59,6 +59,24 @@ spec:
               pw=$(kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath='{.data.password}' | base64 -d)
               test -n "$pw" || { echo "connection secret has empty password"; exit 1; }
               echo "connection secret password length: ${#pw}"
+
+    - name: rollout-reports-updating
+      try:
+        # Simulate the operator starting a rolling update of TiKV: a new revision
+        # with no instance on it yet.
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch tikvgroup/test-instance --subresource status --type merge \
+                -p '{"status":{"updateRevision":"rev-2","currentRevision":"rev-1","updatedReplicas":0}}'
+        - assert:
+            file: 12-assert.yaml
+        # Rollout finishes: every instance is on the new revision again.
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch tikvgroup/test-instance --subresource status --type merge \
+                -p '{"status":{"updateRevision":"rev-2","currentRevision":"rev-2","updatedReplicas":1}}'
+        - assert:
+            file: 11-assert.yaml
 
     - name: delete-instance
       try:

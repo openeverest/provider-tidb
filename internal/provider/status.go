@@ -3,7 +3,9 @@ package provider
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
+	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
@@ -12,8 +14,9 @@ import (
 )
 
 // StatusTiDB reports the Instance phase from the state of the component groups.
-// The cluster is Ready only once PD, TiKV and TiDB all have their desired
-// replicas ready.
+// The cluster is Ready once PD, TiKV and TiDB have all converged on their spec.
+// Until then it is Provisioning on first rollout, and Updating when a change
+// is rolling out on a cluster that was already serving.
 func StatusTiDB(c *controller.Context) (controller.Status, error) {
 	pd := &tidbcorev1.PDGroup{}
 	if err := c.Get(pd, c.Name()); err != nil {
@@ -28,17 +31,61 @@ func StatusTiDB(c *controller.Context) (controller.Status, error) {
 		return controller.Provisioning("Waiting for TiDB group to be created"), nil
 	}
 
-	if !groupReady(pd.Spec.Replicas, pd.Status.ReadyReplicas) {
-		return controller.Provisioning("Waiting for PD nodes to become ready"), nil
+	pending := unconvergedComponents([]groupRollout{
+		{common.ComponentPD, pd.Spec.Replicas, pd.Spec.Template.Spec.Version, pd.Status.CommonStatus, pd.Status.GroupStatus},
+		{common.ComponentTiKV, tikv.Spec.Replicas, tikv.Spec.Template.Spec.Version, tikv.Status.CommonStatus, tikv.Status.GroupStatus},
+		{common.ComponentTiDB, tidb.Spec.Replicas, tidb.Spec.Template.Spec.Version, tidb.Status.CommonStatus, tidb.Status.GroupStatus},
+	})
+	if len(pending) == 0 {
+		return controller.ReadyWithConnectionDetails(connectionDetails(c)), nil
 	}
-	if !groupReady(tikv.Spec.Replicas, tikv.Status.ReadyReplicas) {
-		return controller.Provisioning("Waiting for TiKV nodes to become ready"), nil
-	}
-	if !groupReady(tidb.Spec.Replicas, tidb.Status.ReadyReplicas) {
-		return controller.Provisioning("Waiting for TiDB nodes to become ready"), nil
-	}
+	return rolloutStatus(c.Instance().Status.Phase, pending), nil
+}
 
-	return controller.ReadyWithConnectionDetails(connectionDetails(c)), nil
+// groupRollout pairs a component group's desired state with what the operator
+// last reported for it.
+type groupRollout struct {
+	component    string
+	replicas     *int32
+	version      string
+	commonStatus tidbcorev1.CommonStatus
+	groupStatus  tidbcorev1.GroupStatus
+}
+
+// converged mirrors the operator's IsGroupHealthyAndUpToDate minus observedGeneration,
+// which churns while Context.Apply is a full Update (openeverest#3240).
+func (g groupRollout) converged() bool {
+	if g.replicas == nil || *g.replicas == 0 {
+		return false
+	}
+	desired := *g.replicas
+	s := g.groupStatus
+	return s.Replicas == desired &&
+		s.ReadyReplicas == desired &&
+		s.UpdatedReplicas == desired &&
+		s.CurrentReplicas == desired &&
+		g.commonStatus.UpdateRevision == g.commonStatus.CurrentRevision &&
+		s.Version == g.version
+}
+
+func unconvergedComponents(groups []groupRollout) []string {
+	var pending []string
+	for _, g := range groups {
+		if !g.converged() {
+			pending = append(pending, g.component)
+		}
+	}
+	return pending
+}
+
+// rolloutStatus tells a first rollout (Provisioning) apart from a change on a
+// cluster that was already serving (Updating).
+func rolloutStatus(previous corev1alpha1.InstancePhase, pending []string) controller.Status {
+	components := strings.Join(pending, ", ")
+	if previous == corev1alpha1.InstancePhaseReady || previous == corev1alpha1.InstancePhaseUpdating {
+		return controller.Updating(fmt.Sprintf("Rolling out changes to %s", components))
+	}
+	return controller.Provisioning(fmt.Sprintf("Waiting for %s to become ready", components))
 }
 
 // connectionDetails points at the TiDB internal (SQL) service, which the
@@ -52,11 +99,4 @@ func connectionDetails(c *controller.Context) controller.ConnectionDetails {
 		Username: rootUser,
 		Password: readRootPassword(c),
 	}
-}
-
-func groupReady(desired *int32, ready int32) bool {
-	if desired == nil || *desired == 0 {
-		return false
-	}
-	return ready >= *desired
 }
