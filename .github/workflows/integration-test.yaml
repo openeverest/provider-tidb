@@ -105,6 +105,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Dump runner diagnostics on failure
+        if: failure()
+        run: |
+          df -h
+          free -m
+          for n in $(docker ps --filter name=k3d- --format '{{.Names}}'); do
+            echo "== $n nofile soft/hard:"; docker exec "$n" sh -c 'ulimit -Sn; ulimit -Hn' || true
+          done
+
       - name: Upload chainsaw report on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

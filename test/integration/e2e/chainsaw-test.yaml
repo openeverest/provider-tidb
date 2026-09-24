@@ -13,7 +13,7 @@ spec:
 
   # Image pulls and first cluster bootstrap take minutes, not seconds.
   timeouts:
-    assert: 15m
+    assert: 10m
     error: 5m
     delete: 5m
     cleanup: 5m
@@ -25,6 +25,17 @@ spec:
         content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,pd,tikv,tidb -o yaml
     - script:
         content: kubectl -n $NAMESPACE get pods,pvc,events -o wide
+    - script:
+        content: kubectl -n $NAMESPACE describe pods -l pingcap.com/cluster=test-instance
+    # --previous captures the crashed container, which is where a crash-loop's cause lives.
+    - script:
+        content: |
+          for p in $(kubectl -n $NAMESPACE get pods -l pingcap.com/cluster=test-instance -o name); do
+            echo "===== $p (previous)"; kubectl -n $NAMESPACE logs $p --previous --tail=200 || true
+            echo "===== $p (current)"; kubectl -n $NAMESPACE logs $p --tail=100 || true
+          done
+    - script:
+        content: kubectl describe nodes | grep -A 12 -E "^(Name|Allocated resources|Conditions):"
     - podLogs:
         namespace: provider-system
         selector: app.kubernetes.io/name=provider-tidb
