@@ -25,3 +25,5 @@ package provider
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=tikvgroups/status,verbs=get
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=tidbgroups,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=tidbgroups/status,verbs=get
+// Per-instance CRs the operator creates; their conditions explain unhealthy pods.
+// +kubebuilder:rbac:groups=core.pingcap.com,resources=pds;tikvs;tidbs,verbs=get;list;watch

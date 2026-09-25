@@ -5,6 +5,10 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
@@ -13,10 +17,8 @@ import (
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
-// StatusTiDB reports the Instance phase from the state of the component groups.
-// The cluster is Ready once PD, TiKV and TiDB have all converged on their spec.
-// Until then it is Provisioning on first rollout, and Updating when a change
-// is rolling out on a cluster that was already serving.
+// StatusTiDB reports the Instance phase and per-component readiness from the
+// component groups, plus the reasons the operator gives for unhealthy instances.
 func StatusTiDB(c *controller.Context) (controller.Status, error) {
 	pd := &tidbcorev1.PDGroup{}
 	if err := c.Get(pd, c.Name()); err != nil {
@@ -31,15 +33,24 @@ func StatusTiDB(c *controller.Context) (controller.Status, error) {
 		return controller.Provisioning("Waiting for TiDB group to be created"), nil
 	}
 
-	pending := unconvergedComponents([]groupRollout{
-		{common.ComponentPD, pd.Spec.Replicas, pd.Spec.Template.Spec.Version, pd.Status.CommonStatus, pd.Status.GroupStatus},
-		{common.ComponentTiKV, tikv.Spec.Replicas, tikv.Spec.Template.Spec.Version, tikv.Status.CommonStatus, tikv.Status.GroupStatus},
-		{common.ComponentTiDB, tidb.Spec.Replicas, tidb.Spec.Template.Spec.Version, tidb.Status.CommonStatus, tidb.Status.GroupStatus},
-	})
-	if len(pending) == 0 {
-		return controller.ReadyWithConnectionDetails(connectionDetails(c)), nil
+	groups := []groupRollout{
+		{component: common.ComponentPD, replicas: pd.Spec.Replicas, version: pd.Spec.Template.Spec.Version, commonStatus: pd.Status.CommonStatus, groupStatus: pd.Status.GroupStatus},
+		{component: common.ComponentTiKV, replicas: tikv.Spec.Replicas, version: tikv.Spec.Template.Spec.Version, commonStatus: tikv.Status.CommonStatus, groupStatus: tikv.Status.GroupStatus},
+		{component: common.ComponentTiDB, replicas: tidb.Spec.Replicas, version: tidb.Spec.Template.Spec.Version, commonStatus: tidb.Status.CommonStatus, groupStatus: tidb.Status.GroupStatus},
 	}
-	return rolloutStatus(c.Instance().Status.Phase, pending), nil
+	problems, err := instanceProblems(c)
+	if err != nil {
+		return controller.Status{}, err
+	}
+	for i := range groups {
+		groups[i].problem = problems[groups[i].component]
+	}
+
+	status := evaluateStatus(c.Instance().Status.Phase, groups)
+	if status.Phase == corev1alpha1.InstancePhaseReady {
+		status.ConnectionDetails = connectionDetails(c)
+	}
+	return status, nil
 }
 
 // groupRollout pairs a component group's desired state with what the operator
@@ -50,6 +61,15 @@ type groupRollout struct {
 	version      string
 	commonStatus tidbcorev1.CommonStatus
 	groupStatus  tidbcorev1.GroupStatus
+	// problem is the most severe issue the operator reports on one of the
+	// group's instances, if any.
+	problem componentProblem
+}
+
+type componentProblem struct {
+	message string
+	// fatal marks a state Kubernetes does not get out of without intervention.
+	fatal bool
 }
 
 // converged mirrors the operator's IsGroupHealthyAndUpToDate minus observedGeneration,
@@ -68,24 +88,160 @@ func (g groupRollout) converged() bool {
 		s.Version == g.version
 }
 
-func unconvergedComponents(groups []groupRollout) []string {
-	var pending []string
-	for _, g := range groups {
-		if !g.converged() {
-			pending = append(pending, g.component)
-		}
+func (g groupRollout) desired() int32 {
+	if g.replicas == nil {
+		return 0
 	}
-	return pending
+	return *g.replicas
 }
 
-// rolloutStatus tells a first rollout (Provisioning) apart from a change on a
-// cluster that was already serving (Updating).
-func rolloutStatus(previous corev1alpha1.InstancePhase, pending []string) controller.Status {
-	components := strings.Join(pending, ", ")
-	if previous == corev1alpha1.InstancePhaseReady || previous == corev1alpha1.InstancePhaseUpdating {
-		return controller.Updating(fmt.Sprintf("Rolling out changes to %s", components))
+// summary reads e.g. "tikv (2/3 ready: <operator reason>)".
+func (g groupRollout) summary() string {
+	counts := fmt.Sprintf("%d/%d ready", g.groupStatus.ReadyReplicas, g.desired())
+	reason := g.problem.message
+	if reason == "" {
+		if cond := meta.FindStatusCondition(g.commonStatus.Conditions, tidbcorev1.CondReady); cond != nil &&
+			cond.Status == metav1.ConditionFalse {
+			reason = cond.Message
+		}
 	}
-	return controller.Provisioning(fmt.Sprintf("Waiting for %s to become ready", components))
+	if reason == "" {
+		return fmt.Sprintf("%s (%s)", g.component, counts)
+	}
+	return fmt.Sprintf("%s (%s: %s)", g.component, counts, reason)
+}
+
+func (g groupRollout) componentStatus() controller.ComponentStatus {
+	state := "Ready"
+	switch {
+	case g.problem.fatal:
+		state = "Error"
+	case !g.converged():
+		state = "InProgress"
+	}
+	return controller.ComponentStatus{
+		Name:  g.component,
+		Ready: g.groupStatus.ReadyReplicas,
+		Total: g.desired(),
+		State: state,
+	}
+}
+
+// evaluateStatus picks the Instance phase: Failed if a component is stuck,
+// Ready once every group converged, otherwise Provisioning on the first
+// rollout and Updating on a cluster that was already serving.
+func evaluateStatus(previous corev1alpha1.InstancePhase, groups []groupRollout) controller.Status {
+	components := make([]controller.ComponentStatus, 0, len(groups))
+	var pending []string
+	var failure string
+	for _, g := range groups {
+		components = append(components, g.componentStatus())
+		if g.problem.fatal && failure == "" {
+			failure = fmt.Sprintf("%s is failing: %s", g.component, g.problem.message)
+		}
+		if !g.converged() {
+			pending = append(pending, g.summary())
+		}
+	}
+
+	var status controller.Status
+	summary := strings.Join(pending, ", ")
+	switch {
+	case failure != "":
+		status = controller.Failed(failure)
+	case len(pending) == 0:
+		status = controller.Ready()
+	case previous == corev1alpha1.InstancePhaseReady || previous == corev1alpha1.InstancePhaseUpdating:
+		status = controller.Updating("Rolling out changes to " + summary)
+	default:
+		status = controller.Provisioning("Waiting for " + summary)
+	}
+	status.Components = components
+	return status
+}
+
+// instanceProblems reads the conditions the operator keeps on each PD, TiKV
+// and TiDB instance and returns the most severe problem per component.
+func instanceProblems(c *controller.Context) (map[string]componentProblem, error) {
+	inCluster := client.MatchingLabels{tidbcorev1.LabelKeyCluster: c.Name()}
+	problems := map[string]componentProblem{}
+
+	pds := &tidbcorev1.PDList{}
+	if err := c.List(pds, inCluster); err != nil {
+		return nil, fmt.Errorf("listing pd instances: %w", err)
+	}
+	for i := range pds.Items {
+		recordProblem(problems, common.ComponentPD, pds.Items[i].Name, pds.Items[i].Status.Conditions)
+	}
+
+	tikvs := &tidbcorev1.TiKVList{}
+	if err := c.List(tikvs, inCluster); err != nil {
+		return nil, fmt.Errorf("listing tikv instances: %w", err)
+	}
+	for i := range tikvs.Items {
+		recordProblem(problems, common.ComponentTiKV, tikvs.Items[i].Name, tikvs.Items[i].Status.Conditions)
+	}
+
+	tidbs := &tidbcorev1.TiDBList{}
+	if err := c.List(tidbs, inCluster); err != nil {
+		return nil, fmt.Errorf("listing tidb instances: %w", err)
+	}
+	for i := range tidbs.Items {
+		recordProblem(problems, common.ComponentTiDB, tidbs.Items[i].Name, tidbs.Items[i].Status.Conditions)
+	}
+
+	return problems, nil
+}
+
+// recordProblem keeps the first problem seen for a component, unless a later
+// instance reports a fatal one.
+func recordProblem(problems map[string]componentProblem, component, instance string, conds []metav1.Condition) {
+	problem, ok := instanceProblem(instance, conds)
+	if !ok {
+		return
+	}
+	if existing, seen := problems[component]; seen && (existing.fatal || !problem.fatal) {
+		return
+	}
+	problems[component] = problem
+}
+
+func instanceProblem(instance string, conds []metav1.Condition) (componentProblem, bool) {
+	if cond := meta.FindStatusCondition(conds, tidbcorev1.CondRunning); cond != nil && cond.Status == metav1.ConditionFalse {
+		return componentProblem{
+			message: fmt.Sprintf("instance %s: %s", instance, cond.Message),
+			fatal:   isStuckContainer(cond.Message),
+		}, true
+	}
+	if cond := meta.FindStatusCondition(conds, tidbcorev1.CondReady); cond != nil && cond.Status == metav1.ConditionFalse {
+		return componentProblem{message: fmt.Sprintf("instance %s: %s", instance, cond.Message)}, true
+	}
+	return componentProblem{}, false
+}
+
+// stuckWaitingReasons are container waiting states that retrying alone does
+// not fix. CrashLoopBackOff only counts once kubelet's back-off hits its
+// ceiling, so the restarts TiDB goes through while PD/TiKV bootstrap don't
+// flag the Instance as Failed.
+var stuckWaitingReasons = []string{
+	"ImagePullBackOff",
+	"ErrImageNeverPull",
+	"InvalidImageName",
+	"CreateContainerConfigError",
+}
+
+const maxCrashLoopBackOff = "back-off 5m0s"
+
+func isStuckContainer(message string) bool {
+	if strings.Contains(message, "reason: CrashLoopBackOff") {
+		return strings.Contains(message, maxCrashLoopBackOff)
+	}
+	for _, reason := range stuckWaitingReasons {
+		if strings.Contains(message, "reason: "+reason) {
+			return true
+		}
+	}
+	return false
 }
 
 // connectionDetails points at the TiDB internal (SQL) service, which the
