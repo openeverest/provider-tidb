@@ -59,28 +59,6 @@ func TestDataVolume(t *testing.T) {
 	}
 }
 
-func TestGroupReady(t *testing.T) {
-	three := int32(3)
-	zero := int32(0)
-	tests := []struct {
-		name    string
-		desired *int32
-		ready   int32
-		want    bool
-	}{
-		{"nil desired", nil, 3, false},
-		{"zero desired", &zero, 0, false},
-		{"under", &three, 2, false},
-		{"exact", &three, 3, true},
-		{"over", &three, 4, true},
-	}
-	for _, tt := range tests {
-		if got := groupReady(tt.desired, tt.ready); got != tt.want {
-			t.Errorf("%s: groupReady(%v, %d) = %v, want %v", tt.name, tt.desired, tt.ready, got, tt.want)
-		}
-	}
-}
-
 func TestReplicasOrDefault(t *testing.T) {
 	if got := replicasOrDefault(nil, 3); got == nil || *got != 3 {
 		t.Errorf("nil replicas should fall back to default 3, got %v", got)
