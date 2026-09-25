@@ -2,7 +2,13 @@
 package provider
 
 import (
+	"context"
+
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
@@ -37,9 +43,23 @@ func New() *Provider {
 				controller.WatchOwned(&tidbcorev1.PDGroup{}),
 				controller.WatchOwned(&tidbcorev1.TiKVGroup{}),
 				controller.WatchOwned(&tidbcorev1.TiDBGroup{}),
+				// Instances are owned by their group, not the Instance, so map them back by cluster label.
+				controller.WatchExternal(&tidbcorev1.PD{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
+				controller.WatchExternal(&tidbcorev1.TiKV{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
+				controller.WatchExternal(&tidbcorev1.TiDB{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 			},
 		},
 	}
+}
+
+// instanceForCluster maps an operator object to the Instance of the same name,
+// since the provider names every TiDB Cluster after its Instance.
+func instanceForCluster(_ context.Context, obj client.Object) []reconcile.Request {
+	cluster := obj.GetLabels()[tidbcorev1.LabelKeyCluster]
+	if cluster == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: cluster}}}
 }
 
 // Validate checks that the Instance spec is valid for TiDB.

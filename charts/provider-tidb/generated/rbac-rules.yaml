@@ -88,3 +88,13 @@
     - tikvgroups/status
   verbs:
     - get
+- apiGroups:
+    - core.pingcap.com
+  resources:
+    - pds
+    - tidbs
+    - tikvs
+  verbs:
+    - get
+    - list
+    - watch
