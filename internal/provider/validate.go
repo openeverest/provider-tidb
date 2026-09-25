@@ -32,5 +32,8 @@ func ValidateTiDB(c *controller.Context) error {
 		return fmt.Errorf("pd replicas must be an odd number, got %d", *pd.Replicas)
 	}
 
-	return validateVersions(c)
+	if err := validateVersions(c); err != nil {
+		return err
+	}
+	return validateStorage(c)
 }

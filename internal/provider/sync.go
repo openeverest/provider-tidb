@@ -23,6 +23,8 @@ const (
 
 var defaultVolumeSize = resource.MustParse("10Gi")
 
+const dataVolumeName = "data"
+
 // SyncTiDB reconciles the Instance into a TiDB Operator v2 Cluster plus one
 // group per component. Each resource carries an owner reference to the Instance
 // (set by c.Apply), so deletion cascades automatically.
@@ -206,19 +208,21 @@ func toResources(r *corev1.ResourceRequirements) tidbcorev1.ResourceRequirements
 // dataVolume builds the required `data` volume for a stateful component.
 func dataVolume(s *corev1alpha1.Storage, mountType tidbcorev1.VolumeMountType) tidbcorev1.Volume {
 	v := tidbcorev1.Volume{
-		Name:    "data",
+		Name:    dataVolumeName,
 		Mounts:  []tidbcorev1.VolumeMount{{Type: mountType}},
-		Storage: defaultVolumeSize,
+		Storage: dataVolumeSize(s),
 	}
-	if s != nil {
-		if !s.Size.IsZero() {
-			v.Storage = s.Size
-		}
-		if s.StorageClass != nil {
-			v.StorageClassName = s.StorageClass
-		}
+	if s != nil && s.StorageClass != nil {
+		v.StorageClassName = s.StorageClass
 	}
 	return v
+}
+
+func dataVolumeSize(s *corev1alpha1.Storage) resource.Quantity {
+	if s == nil || s.Size.IsZero() {
+		return defaultVolumeSize
+	}
+	return s.Size
 }
 
 func replicasOrDefault(r *int32, def int32) *int32 {

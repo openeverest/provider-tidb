@@ -1,0 +1,12 @@
+# Growing the Instance's TiKV storage grows the group's data volume, which the
+# operator then applies to each PVC.
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiKVGroup
+metadata:
+  name: test-instance
+spec:
+  template:
+    spec:
+      volumes:
+        - name: data
+          storage: 30Gi

@@ -79,13 +79,20 @@ Stateful components (PD, TiKV) additionally report:
 | Capability | Status | Notes |
 |---|---|---|
 | Persistent storage | ✅ | Per-component size and storage class |
-| Storage expansion | ❌ | Planned |
+| Storage expansion | ✅ | Grow `storage.size`; shrinking is rejected. Needs an expandable StorageClass (see below) |
 | Backups (on demand) | ❌ | Planned — `br.pingcap.com` |
 | Backups (scheduled) | ❌ | Planned |
 | Point-in-time recovery | ❌ | Planned |
 | Restore | ❌ | Planned |
 
 See [ROADMAP.md](ROADMAP.md) for the planned work.
+
+> [!IMPORTANT]
+> Growing `spec.components.{pd,tikv}.storage.size` resizes the existing PVCs in place, which only
+> works if their StorageClass sets `allowVolumeExpansion: true`
+> (`kubectl get storageclass <name> -o jsonpath='{.allowVolumeExpansion}'`). On a StorageClass
+> without it — e.g. the k3s/kind `local-path` default — the TiDB Operator leaves the volumes at their
+> old size. Volumes can never be shrunk; `Validate` rejects a smaller size.
 
 ## Installation
 
@@ -284,6 +291,7 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 | Provider logs `no matches for kind "TiKVGroup"` | TiDB CRDs missing. The chart's pre-install hook installs them; check the `<release>-crd-installer` Job (and its egress to `crds.url`), or apply them manually: `kubectl apply --server-side -f <crds.url>` |
 | Operator pod `CrashLoopBackOff` at startup | The TiDB CRDs must exist before the operator starts (see the row above) |
 | Groups created but no pods | Inspect the group/instance status (`kubectl get tidbgroup,tikvgroup,pdgroup`) — the failure is upstream in the operator |
+| Storage size raised but PVCs unchanged | The StorageClass must allow volume expansion; check `kubectl get pvc` and the operator logs |
 
 ## Contributing
 

@@ -78,6 +78,23 @@ spec:
         - assert:
             file: 11-assert.yaml
 
+    - name: expand-storage
+      try:
+        - patch:
+            file: 13-expand-storage.yaml
+        - assert:
+            file: 13-assert.yaml
+
+    - name: shrink-storage-rejected
+      try:
+        - patch:
+            file: 14-shrink-storage.yaml
+        - assert:
+            file: 14-assert.yaml
+        # The group keeps the expanded size.
+        - assert:
+            file: 13-assert.yaml
+
     - name: delete-instance
       try:
         - delete:
