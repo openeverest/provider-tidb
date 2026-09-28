@@ -3,23 +3,23 @@
 spec:
   componentTypes:
     pd:
+      defaultVersion: v8.5.2
       versions:
-        - default: true
-          image: pingcap/pd:v8.5.2
+        - image: pingcap/pd:v8.5.2
           version: v8.5.2
         - image: pingcap/pd:v7.5.5
           version: v7.5.5
     tidb:
+      defaultVersion: v8.5.2
       versions:
-        - default: true
-          image: pingcap/tidb:v8.5.2
+        - image: pingcap/tidb:v8.5.2
           version: v8.5.2
         - image: pingcap/tidb:v7.5.5
           version: v7.5.5
     tikv:
+      defaultVersion: v8.5.2
       versions:
-        - default: true
-          image: pingcap/tikv:v8.5.2
+        - image: pingcap/tikv:v8.5.2
           version: v8.5.2
         - image: pingcap/tikv:v7.5.5
           version: v7.5.5
@@ -48,6 +48,7 @@ spec:
               type: string
           type: object
       type: tikv
+  defaultVersion: 8.5.2
   release:
     version: 0.1.1
   topologies:
@@ -347,7 +348,6 @@ spec:
         pd: v8.5.2
         tidb: v8.5.2
         tikv: v8.5.2
-      default: true
       name: 8.5.2
     - components:
         pd: v7.5.5
