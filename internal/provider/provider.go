@@ -47,9 +47,11 @@ func New() *Provider {
 			},
 			WatchConfigs: []controller.WatchConfig{
 				controller.WatchOwned(&tidbcorev1.Cluster{}),
-				controller.WatchOwned(&tidbcorev1.PDGroup{}),
-				controller.WatchOwned(&tidbcorev1.TiKVGroup{}),
-				controller.WatchOwned(&tidbcorev1.TiDBGroup{}),
+				// The component groups are owned by the Cluster (not the Instance),
+				// so map them back to the Instance by name (group name == Instance name).
+				controller.WatchExternal(&tidbcorev1.PDGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
+				controller.WatchExternal(&tidbcorev1.TiKVGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
+				controller.WatchExternal(&tidbcorev1.TiDBGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
 				// Instances are owned by their group, not the Instance, so map them back by cluster label.
 				controller.WatchExternal(&tidbcorev1.PD{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				controller.WatchExternal(&tidbcorev1.TiKV{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
@@ -79,6 +81,12 @@ func instanceForCluster(_ context.Context, obj client.Object) []reconcile.Reques
 		return nil
 	}
 	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: cluster}}}
+}
+
+// instanceForGroup maps a component group to its Instance. The provider names
+// every group after the Instance, so the group's own name is the Instance name.
+func instanceForGroup(_ context.Context, obj client.Object) []reconcile.Request {
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}}}
 }
 
 // Validate checks that the Instance spec is valid for TiDB.
