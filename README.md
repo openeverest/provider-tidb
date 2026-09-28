@@ -83,7 +83,7 @@ Stateful components (PD, TiKV) additionally report:
 | Backups (on demand) | ✅ | Full snapshot to S3-compatible storage (BR) |
 | Backups (scheduled) | ❌ | Planned |
 | Point-in-time recovery | ❌ | Planned |
-| Restore | ❌ | Planned |
+| Restore | ✅ | Into an existing Instance, or seed a new one via `spec.dataSource` |
 
 See [ROADMAP.md](ROADMAP.md) for the planned work.
 

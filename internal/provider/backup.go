@@ -119,23 +119,141 @@ func (p *Provider) CleanupBackup(c *controller.Context, backup *backupv1alpha1.B
 	return false, nil
 }
 
-// SyncRestore is not implemented yet — restore is tracked separately.
-func (p *Provider) SyncRestore(_ *controller.Context, _ *backupv1alpha1.Restore) (controller.RestoreExecutionStatus, error) {
-	return controller.RestoreExecutionStatus{
-		State:   backupv1alpha1.RestoreStateFailed,
-		Message: "Restore is not yet supported by the TiDB provider",
-	}, nil
+// SyncRestore reconciles a Restore CR into a br.pingcap.com Restore that reads
+// the source backup's data from S3 and applies it to the target cluster. It
+// serves both explicit restores and initial seeding (.spec.dataSource), which
+// the runtime routes through the same Restore CR.
+func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Restore) (controller.RestoreExecutionStatus, error) {
+	ds := restore.Spec.DataSource
+	if ds.Type != backupv1alpha1.DataSourceTypeBackup || ds.Backup == nil {
+		return controller.RestoreExecutionStatus{
+			State:   backupv1alpha1.RestoreStateFailed,
+			Message: "Only Backup data sources are supported (point-in-time recovery is not yet implemented)",
+		}, nil
+	}
+
+	srcBackup := &backupv1alpha1.Backup{}
+	if err := c.Get(srcBackup, ds.Backup.BackupRef.Name); err != nil {
+		if apierrors.IsNotFound(err) {
+			return controller.RestoreExecutionStatus{
+				State:   backupv1alpha1.RestoreStateFailed,
+				Message: fmt.Sprintf("source backup %q not found", ds.Backup.BackupRef.Name),
+			}, nil
+		}
+		return controller.RestoreExecutionStatus{}, fmt.Errorf("get source backup: %w", err)
+	}
+	if err := controller.ValidateBackupSucceeded(srcBackup); err != nil {
+		return controller.RestoreExecutionStatus{
+			State:   backupv1alpha1.RestoreStatePending,
+			Message: "Waiting for source backup to succeed",
+		}, nil
+	}
+	if srcBackup.Spec.Origin.InstanceRef == nil {
+		return controller.RestoreExecutionStatus{
+			State:   backupv1alpha1.RestoreStateFailed,
+			Message: "source backup has no instance origin",
+		}, nil
+	}
+
+	cluster := &tidbcorev1.Cluster{}
+	if err := c.Get(cluster, c.Name()); err != nil {
+		if apierrors.IsNotFound(err) {
+			return controller.RestoreExecutionStatus{
+				State:   backupv1alpha1.RestoreStatePending,
+				Message: "Waiting for TiDB cluster to exist",
+			}, nil
+		}
+		return controller.RestoreExecutionStatus{}, fmt.Errorf("get cluster: %w", err)
+	}
+
+	storage, err := c.BackupStorage(srcBackup.Spec.StorageRef.Name)
+	if err != nil {
+		return controller.RestoreExecutionStatus{}, err
+	}
+	if storage.Spec.S3 == nil {
+		return controller.RestoreExecutionStatus{
+			State:   backupv1alpha1.RestoreStateFailed,
+			Message: fmt.Sprintf("BackupStorage %q is not S3-backed", storage.Name),
+		}, nil
+	}
+	accessKeyID, secretAccessKey, err := c.BackupStorageCredentials(storage)
+	if err != nil {
+		return controller.RestoreExecutionStatus{}, err
+	}
+
+	// BR reads the backup from the same object-key prefix SyncBackup wrote it to,
+	// derived from the SOURCE backup's identity (so clones read the source data).
+	prefix := backupPrefix(srcBackup.Namespace, srcBackup.Spec.Origin.InstanceRef.Name, srcBackup.Name)
+
+	brSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: brSecretName(restore.Name), Namespace: restore.Namespace},
+		Type:       corev1.SecretTypeOpaque,
+	}
+	if _, err := controllerutil.CreateOrUpdate(c.Context(), c.Client(), brSecret, func() error {
+		brSecret.Data = map[string][]byte{
+			"access_key": []byte(accessKeyID),
+			"secret_key": []byte(secretAccessKey),
+		}
+		return controllerutil.SetControllerReference(restore, brSecret, c.Client().Scheme())
+	}); err != nil {
+		return controller.RestoreExecutionStatus{}, fmt.Errorf("ensure BR credentials secret: %w", err)
+	}
+
+	brRestore := &tidbbrv1.Restore{
+		ObjectMeta: metav1.ObjectMeta{Name: restore.Name, Namespace: restore.Namespace},
+	}
+	if _, err := controllerutil.CreateOrUpdate(c.Context(), c.Client(), brRestore, func() error {
+		brRestore.Spec.Type = tidbbrv1.BackupTypeFull
+		brRestore.Spec.Mode = tidbbrv1.RestoreModeSnapshot
+		brRestore.Spec.S3 = &tidbbrv1.S3StorageProvider{
+			Provider:   tidbbrv1.S3StorageProviderTypeAWS,
+			Region:     storage.Spec.S3.Region,
+			Bucket:     storage.Spec.S3.Bucket,
+			Endpoint:   storage.Spec.S3.EndpointURL,
+			Prefix:     prefix,
+			SecretName: brSecret.Name,
+		}
+		brRestore.Spec.BR = &tidbbrv1.BRConfig{
+			Cluster:          c.Name(),
+			ClusterNamespace: c.Namespace(),
+		}
+		return controllerutil.SetControllerReference(restore, brRestore, c.Client().Scheme())
+	}); err != nil {
+		return controller.RestoreExecutionStatus{}, fmt.Errorf("create or update BR restore: %w", err)
+	}
+
+	return brRestoreExecutionStatus(brRestore), nil
 }
 
-// CleanupRestore is a no-op: no restore resources are created yet.
-func (p *Provider) CleanupRestore(_ *controller.Context, _ *backupv1alpha1.Restore) (bool, error) {
-	return true, nil
+// CleanupRestore deletes the BR Restore CR.
+func (p *Provider) CleanupRestore(c *controller.Context, restore *backupv1alpha1.Restore) (bool, error) {
+	brRestore := &tidbbrv1.Restore{}
+	err := c.Get(brRestore, restore.Name)
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("get BR restore for cleanup: %w", err)
+	}
+	if brRestore.DeletionTimestamp.IsZero() {
+		if err := c.Delete(brRestore); err != nil {
+			return false, fmt.Errorf("delete BR restore: %w", err)
+		}
+	}
+	return false, nil
 }
 
 // BackupWatches routes BR Backup status changes back to the owning Backup CR.
 func (p *Provider) BackupWatches() []controller.WatchConfig {
 	return []controller.WatchConfig{
 		controller.WatchOwned(&tidbbrv1.Backup{}),
+	}
+}
+
+// RestoreWatches routes BR Restore status changes back to the owning Restore CR.
+func (p *Provider) RestoreWatches() []controller.WatchConfig {
+	return []controller.WatchConfig{
+		controller.WatchOwned(&tidbbrv1.Restore{}),
 	}
 }
 
@@ -193,4 +311,49 @@ func brFailureMessage(b *tidbbrv1.Backup) string {
 		}
 	}
 	return "BR backup failed"
+}
+
+// brRestoreExecutionStatus maps the BR Restore phase onto the runtime's execution status.
+func brRestoreExecutionStatus(r *tidbbrv1.Restore) controller.RestoreExecutionStatus {
+	exec := controller.RestoreExecutionStatus{
+		OperatorRestoreRef: &commonv1alpha1.TypedObjectRef{
+			Group: tidbbrv1.GroupName,
+			Kind:  "Restore",
+			Name:  r.Name,
+		},
+	}
+	if !r.Status.TimeStarted.IsZero() {
+		started := r.Status.TimeStarted
+		exec.StartedAt = &started
+	}
+
+	switch r.Status.Phase {
+	case tidbbrv1.RestoreComplete:
+		exec.State = backupv1alpha1.RestoreStateSucceeded
+		if !r.Status.TimeCompleted.IsZero() {
+			completed := r.Status.TimeCompleted
+			exec.CompletedAt = &completed
+		}
+	case tidbbrv1.RestoreFailed, tidbbrv1.RestoreInvalid:
+		exec.State = backupv1alpha1.RestoreStateFailed
+		exec.Message = brRestoreFailureMessage(r)
+	case tidbbrv1.RestoreScheduled, tidbbrv1.RestoreRunning:
+		exec.State = backupv1alpha1.RestoreStateRunning
+	case "":
+		exec.State = backupv1alpha1.RestoreStatePending
+	default:
+		exec.State = backupv1alpha1.RestoreStateRunning
+	}
+	return exec
+}
+
+// brRestoreFailureMessage extracts a human-readable failure reason from the BR Restore conditions.
+func brRestoreFailureMessage(r *tidbbrv1.Restore) string {
+	for i := len(r.Status.Conditions) - 1; i >= 0; i-- {
+		cond := r.Status.Conditions[i]
+		if cond.Status == metav1.ConditionTrue && cond.Message != "" {
+			return cond.Message
+		}
+	}
+	return "BR restore failed"
 }

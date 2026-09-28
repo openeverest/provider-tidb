@@ -1,0 +1,7 @@
+# After the seeding restore completes, the clone becomes Ready.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: clone
+status:
+  phase: Ready

@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -70,7 +72,47 @@ func SyncTiDB(c *controller.Context) error {
 		return err
 	}
 
+	return reconcileDataSource(c)
+}
+
+// reconcileDataSource seeds a new Instance from .spec.dataSource once the
+// cluster can accept a restore. The runtime creates and tracks the Restore CR
+// (SyncRestore turns it into a BR Restore); the Instance is held in Restoring
+// until it completes.
+func reconcileDataSource(c *controller.Context) error {
+	if c.Instance().Spec.DataSource == nil {
+		return nil
+	}
+	if !clusterReady(c) {
+		c.SetDataSourceStatus(controller.DataSourceStatus{
+			Done:    false,
+			State:   controller.DataSourceStateWaiting,
+			Reason:  corev1alpha1.ReasonDataSourceWaitingForCluster,
+			Message: "Waiting for the TiDB cluster to be ready before restoring",
+		})
+		return nil
+	}
+	if _, err := c.ReconcileDataSource(); err != nil {
+		return fmt.Errorf("reconcile data source: %w", err)
+	}
 	return nil
+}
+
+// clusterReady reports whether every component group has its desired replicas ready.
+func clusterReady(c *controller.Context) bool {
+	pd := &tidbcorev1.PDGroup{}
+	tikv := &tidbcorev1.TiKVGroup{}
+	tidb := &tidbcorev1.TiDBGroup{}
+	if c.Get(pd, c.Name()) != nil || c.Get(tikv, c.Name()) != nil || c.Get(tidb, c.Name()) != nil {
+		return false
+	}
+	return groupIsReady(pd.Spec.Replicas, pd.Status.ReadyReplicas) &&
+		groupIsReady(tikv.Spec.Replicas, tikv.Status.ReadyReplicas) &&
+		groupIsReady(tidb.Spec.Replicas, tidb.Status.ReadyReplicas)
+}
+
+func groupIsReady(desired *int32, ready int32) bool {
+	return desired != nil && *desired > 0 && ready >= *desired
 }
 
 func buildCluster(c *controller.Context) (*tidbcorev1.Cluster, error) {

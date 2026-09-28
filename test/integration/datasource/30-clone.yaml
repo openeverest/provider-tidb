@@ -1,0 +1,22 @@
+# A new Instance seeded from src-backup via spec.dataSource.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: clone
+spec:
+  providerRef: {name: tidb}
+  version: "8.5.2"
+  topology: {type: cluster}
+  components:
+    pd: {type: pd, replicas: 1, storage: {size: 10Gi}}
+    tikv: {type: tikv, replicas: 1, storage: {size: 20Gi}}
+    tidb: {type: tidb, replicas: 1}
+  backup:
+    enabled: true
+    classRef: {name: br}
+    storages:
+      - storageRef: {name: s3-store}
+  dataSource:
+    type: Backup
+    backup:
+      backupRef: {name: src-backup}

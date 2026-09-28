@@ -20,6 +20,12 @@ import (
 // StatusTiDB reports the Instance phase and per-component readiness from the
 // component groups, plus the reasons the operator gives for unhealthy instances.
 func StatusTiDB(c *controller.Context) (controller.Status, error) {
+	// While an initial-seeding restore (.spec.dataSource) is in flight, hold the
+	// Instance in Restoring so it only becomes Ready once the data is restored.
+	if ds := c.GetDataSourceStatus(); ds != nil && !ds.Done {
+		return controller.Restoring(ds.Message), nil
+	}
+
 	pd := &tidbcorev1.PDGroup{}
 	if err := c.Get(pd, c.Name()); err != nil {
 		return controller.Provisioning("Waiting for PD group to be created"), nil
