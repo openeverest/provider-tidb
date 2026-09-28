@@ -1,0 +1,5 @@
+# The provider reconciles the Instance into a TiDB Cluster; the backup targets it.
+apiVersion: core.pingcap.com/v1alpha1
+kind: Cluster
+metadata:
+  name: bkp

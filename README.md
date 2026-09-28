@@ -80,7 +80,7 @@ Stateful components (PD, TiKV) additionally report:
 |---|---|---|
 | Persistent storage | ✅ | Per-component size and storage class |
 | Storage expansion | ✅ | Grow `storage.size`; shrinking is rejected. Needs an expandable StorageClass (see below) |
-| Backups (on demand) | ❌ | Planned — `br.pingcap.com` |
+| Backups (on demand) | ✅ | Full snapshot to S3-compatible storage (BR) |
 | Backups (scheduled) | ❌ | Planned |
 | Point-in-time recovery | ❌ | Planned |
 | Restore | ❌ | Planned |

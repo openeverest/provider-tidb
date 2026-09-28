@@ -1,0 +1,69 @@
+---
+# On-demand snapshot backup to S3: creating a Backup produces a br.pingcap.com
+# Backup with inlined S3 storage + credentials secret, and the Backup reports
+# Succeeded once BR completes.
+#
+# The TiDB operator is not deployed here — BR completion is simulated by
+# patching the BR Backup status.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: backup
+spec:
+  description: |
+    On-demand full snapshot backup to S3-compatible storage.
+
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get backups.backup.openeverest.io -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get backups.br.pingcap.com -o yaml
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/name=provider-tidb
+        tail: 100
+
+  steps:
+    - name: provider-deployed
+      try:
+        - assert:
+            file: 00-assert.yaml
+
+    - name: setup
+      try:
+        - apply:
+            file: 10-setup.yaml
+        - assert:
+            file: 10-assert.yaml
+
+    - name: create-backup
+      try:
+        - apply:
+            file: 20-backup.yaml
+        - assert:
+            file: 20-assert.yaml
+
+    - name: backup-succeeds
+      try:
+        # Simulate BR completing the backup; the provider watches the BR Backup
+        # and recomputes the Backup CR status.
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch backups.br.pingcap.com/test-backup --subresource status --type merge \
+                -p '{"status":{"phase":"Complete","backupSizeReadable":"1 MB"}}'
+        - assert:
+            file: 21-assert.yaml
+
+    - name: delete-backup
+      try:
+        - delete:
+            ref:
+              apiVersion: backup.openeverest.io/v1alpha1
+              kind: Backup
+              name: test-backup
+        - wait:
+            apiVersion: backup.openeverest.io/v1alpha1
+            kind: Backup
+            name: test-backup
+            for:
+              deletion: {}

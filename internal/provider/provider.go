@@ -12,6 +12,7 @@ import (
 
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
+	tidbbrv1 "github.com/pingcap/tidb-operator/api/v2/br/v1alpha1"
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
 	"github.com/openeverest/provider-tidb/internal/common"
@@ -21,6 +22,8 @@ import (
 var (
 	_ controller.ProviderInterface = (*Provider)(nil)
 	_ controller.WatchProvider     = (*Provider)(nil)
+	_ controller.BackupProvider    = (*Provider)(nil)
+	_ controller.BackupWatcher     = (*Provider)(nil)
 )
 
 // Provider implements controller.ProviderInterface for TiDB, translating an
@@ -37,6 +40,7 @@ func New() *Provider {
 			ProviderName: common.ProviderName,
 			SchemeFuncs: []func(*runtime.Scheme) error{
 				tidbcorev1.Install,
+				tidbbrv1.Install,
 			},
 			WatchConfigs: []controller.WatchConfig{
 				controller.WatchOwned(&tidbcorev1.Cluster{}),
