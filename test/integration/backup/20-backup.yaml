@@ -1,0 +1,13 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+metadata:
+  name: test-backup
+spec:
+  origin:
+    type: Instance
+    instanceRef:
+      name: bkp
+  classRef:
+    name: br
+  storageRef:
+    name: s3-store

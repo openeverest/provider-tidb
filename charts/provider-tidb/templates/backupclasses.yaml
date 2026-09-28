@@ -1,0 +1,9 @@
+{{/*
+Renders every BackupClass manifest produced by `provider-sdk generate` from
+definition/backupclasses/. One YAML document per file; the generator writes
+deterministic, sorted output so Helm diffs stay clean.
+*/}}
+{{- range $path, $_ := .Files.Glob "generated/backupclasses/*.yaml" }}
+---
+{{ $.Files.Get $path }}
+{{- end }}

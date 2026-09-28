@@ -149,6 +149,10 @@ test-integration: ## Run all integration tests against the current cluster.
 test-integration-core: ## Run core integration tests.
 	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/core
 
+.PHONY: test-integration-backup
+test-integration-backup: ## Run backup integration tests.
+	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/backup
+
 .PHONY: test-integration-e2e
 test-integration-e2e: ## Run end-to-end tests against the real TiDB Operator (see deploy-provider-e2e).
 	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/e2e
@@ -179,6 +183,8 @@ install-crds: ## Install OpenEverest CRDs (and your operator's CRDs) into the cl
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_tikvs.yaml
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_tidbgroups.yaml
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_tidbs.yaml
+	# TiDB Operator BR CRDs used by the backup provider.
+	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/br.pingcap.com_backups.yaml
 
 .PHONY: deploy-provider-ci
 deploy-provider-ci: helm-deps ## Deploy the provider via Helm for CI (IMG must already be imported into k3d).

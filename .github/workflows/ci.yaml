@@ -104,6 +104,15 @@ jobs:
       suite: core
     secrets: inherit
 
+  test-integration-backup:
+    name: Integration / backup
+    needs: [lint, build, verify]
+    uses: ./.github/workflows/integration-test.yaml
+    with:
+      make_target: test-integration-backup
+      suite: backup
+    secrets: inherit
+
   test-integration-e2e:
     name: Integration / e2e
     needs: [lint, build, verify]

@@ -27,3 +27,17 @@ package provider
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=tidbgroups/status,verbs=get
 // Per-instance CRs the operator creates; their conditions explain unhealthy pods.
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=pds;tikvs;tidbs,verbs=get;list;watch
+
+// Backup: OpenEverest backup resources the runtime reconciles.
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupstorages,verbs=get;list;watch
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backups,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backups/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backups/finalizers,verbs=update
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=restores,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=restores/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=restores/finalizers,verbs=update
+// TiDB Operator BR backups the provider creates from a Backup CR.
+// +kubebuilder:rbac:groups=br.pingcap.com,resources=backups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=br.pingcap.com,resources=backups/status,verbs=get
+
