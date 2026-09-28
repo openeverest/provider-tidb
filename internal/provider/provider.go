@@ -12,6 +12,8 @@ import (
 
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
+	backupv1alpha1 "github.com/openeverest/openeverest/v2/api/backup/v1alpha1"
+
 	tidbbrv1 "github.com/pingcap/tidb-operator/api/v2/br/v1alpha1"
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
@@ -24,6 +26,7 @@ var (
 	_ controller.WatchProvider     = (*Provider)(nil)
 	_ controller.BackupProvider    = (*Provider)(nil)
 	_ controller.BackupWatcher     = (*Provider)(nil)
+	_ controller.RestoreWatcher    = (*Provider)(nil)
 )
 
 // Provider implements controller.ProviderInterface for TiDB, translating an
@@ -44,16 +47,30 @@ func New() *Provider {
 			},
 			WatchConfigs: []controller.WatchConfig{
 				controller.WatchOwned(&tidbcorev1.Cluster{}),
-				controller.WatchOwned(&tidbcorev1.PDGroup{}),
-				controller.WatchOwned(&tidbcorev1.TiKVGroup{}),
-				controller.WatchOwned(&tidbcorev1.TiDBGroup{}),
+				// The component groups are owned by the Cluster (not the Instance),
+				// so map them back to the Instance by name (group name == Instance name).
+				controller.WatchExternal(&tidbcorev1.PDGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
+				controller.WatchExternal(&tidbcorev1.TiKVGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
+				controller.WatchExternal(&tidbcorev1.TiDBGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
 				// Instances are owned by their group, not the Instance, so map them back by cluster label.
 				controller.WatchExternal(&tidbcorev1.PD{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				controller.WatchExternal(&tidbcorev1.TiKV{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				controller.WatchExternal(&tidbcorev1.TiDB{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
+				// Re-reconcile an Instance when its seeding Restore (.spec.dataSource) changes.
+				controller.WatchExternal(&backupv1alpha1.Restore{}, handler.EnqueueRequestsFromMapFunc(instanceForRestore)),
 			},
 		},
 	}
+}
+
+// instanceForRestore maps a Restore CR to the Instance it targets, so the
+// Instance re-reconciles when its .spec.dataSource seeding restore progresses.
+func instanceForRestore(_ context.Context, obj client.Object) []reconcile.Request {
+	restore, ok := obj.(*backupv1alpha1.Restore)
+	if !ok || restore.Spec.InstanceRef.Name == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: restore.Spec.InstanceRef.Name}}}
 }
 
 // instanceForCluster maps an operator object to the Instance of the same name,
@@ -64,6 +81,12 @@ func instanceForCluster(_ context.Context, obj client.Object) []reconcile.Reques
 		return nil
 	}
 	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: cluster}}}
+}
+
+// instanceForGroup maps a component group to its Instance. The provider names
+// every group after the Instance, so the group's own name is the Instance name.
+func instanceForGroup(_ context.Context, obj client.Object) []reconcile.Request {
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}}}
 }
 
 // Validate checks that the Instance spec is valid for TiDB.

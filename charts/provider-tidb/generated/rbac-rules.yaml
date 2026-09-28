@@ -33,7 +33,6 @@
     - backup.openeverest.io
   resources:
     - backups
-    - restores
   verbs:
     - get
     - list
@@ -57,9 +56,22 @@
     - patch
     - update
 - apiGroups:
+    - backup.openeverest.io
+  resources:
+    - restores
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
     - br.pingcap.com
   resources:
     - backups
+    - restores
   verbs:
     - create
     - delete
@@ -72,6 +84,7 @@
     - br.pingcap.com
   resources:
     - backups/status
+    - restores/status
   verbs:
     - get
 - apiGroups:

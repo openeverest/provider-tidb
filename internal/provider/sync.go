@@ -1,9 +1,13 @@
 package provider
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
@@ -26,8 +30,9 @@ var defaultVolumeSize = resource.MustParse("10Gi")
 const dataVolumeName = "data"
 
 // SyncTiDB reconciles the Instance into a TiDB Operator v2 Cluster plus one
-// group per component. Each resource carries an owner reference to the Instance
-// (set by c.Apply), so deletion cascades automatically.
+// group per component. The Cluster is owned by the Instance; the component
+// groups are owned by the Cluster so that deleting the Instance cascades
+// through the operator's ordered Cluster teardown (see applyWithOwner).
 func SyncTiDB(c *controller.Context) error {
 	providerSpec, err := c.ProviderSpec()
 	if err != nil {
@@ -46,31 +51,110 @@ func SyncTiDB(c *controller.Context) error {
 		return err
 	}
 
-	// The Cluster is the shared root; every group references it by name.
+	// The Cluster is the shared root and is owned by the Instance, so deleting
+	// the Instance garbage-collects it and the operator's Cluster finalizer then
+	// tears the groups down in the correct order. It must be applied with
+	// applyWithOwner (not c.Apply) so the operator's finalizer is preserved.
 	cluster, err := buildCluster(c)
 	if err != nil {
 		return err
 	}
-	if err := c.Apply(cluster); err != nil {
+	if err := applyWithOwner(c, c.Instance(), cluster); err != nil {
 		return err
+	}
+	// Re-read the Cluster so its UID is available for the group owner references.
+	owner := &tidbcorev1.Cluster{}
+	if err := c.Get(owner, c.Name()); err != nil {
+		return fmt.Errorf("get cluster for ownership: %w", err)
 	}
 
 	pd := comps[common.ComponentPD]
-	if err := c.Apply(buildPDGroup(c, pd, resolveImage(providerSpec, common.ComponentPD, pd))); err != nil {
+	if err := applyWithOwner(c, owner, buildPDGroup(c, pd, resolveImage(providerSpec, common.ComponentPD, pd))); err != nil {
 		return err
 	}
 
 	tikv := comps[common.ComponentTiKV]
-	if err := c.Apply(buildTiKVGroup(c, tikv, resolveImage(providerSpec, common.ComponentTiKV, tikv))); err != nil {
+	if err := applyWithOwner(c, owner, buildTiKVGroup(c, tikv, resolveImage(providerSpec, common.ComponentTiKV, tikv))); err != nil {
 		return err
 	}
 
 	tidb := comps[common.ComponentTiDB]
-	if err := c.Apply(buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))); err != nil {
+	if err := applyWithOwner(c, owner, buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))); err != nil {
 		return err
 	}
 
+	return reconcileDataSource(c)
+}
+
+// applyWithOwner creates or updates obj with the given controller owner,
+// preserving any finalizers the operator has added.
+//
+// Ordered teardown depends on two things this helper guarantees:
+//   - The component groups are owned by the Cluster (not the Instance), so
+//     deleting the Instance garbage-collects only the Cluster. While the
+//     Cluster is held by its finalizer, its Cluster-owned groups are not
+//     concurrently garbage-collected; the operator deletes them in sequence.
+//     Instance ownership would GC every group at once, killing PD mid-eviction
+//     and deadlocking TiKV on its "leaders are not all evicted" finalizer.
+//   - The operator's finalizer (e.g. pingcap.com/finalizer) is preserved on
+//     update. A blind replace would strip it, so deleting the Cluster would
+//     hard-delete it instead of triggering the operator's ordered teardown,
+//     orphaning the groups (their controllers fail with "cannot get cluster").
+func applyWithOwner(c *controller.Context, owner, obj client.Object) error {
+	if err := controllerutil.SetControllerReference(owner, obj, c.Client().Scheme()); err != nil {
+		return fmt.Errorf("set owner: %w", err)
+	}
+	existing := obj.DeepCopyObject().(client.Object)
+	err := c.Client().Get(c.Context(), client.ObjectKeyFromObject(obj), existing)
+	if apierrors.IsNotFound(err) {
+		return c.Client().Create(c.Context(), obj)
+	}
+	if err != nil {
+		return err
+	}
+	obj.SetFinalizers(existing.GetFinalizers())
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	return c.Client().Update(c.Context(), obj)
+}
+
+// reconcileDataSource seeds a new Instance from .spec.dataSource once the
+// cluster can accept a restore. The runtime creates and tracks the Restore CR
+// (SyncRestore turns it into a BR Restore); the Instance is held in Restoring
+// until it completes.
+func reconcileDataSource(c *controller.Context) error {
+	if c.Instance().Spec.DataSource == nil {
+		return nil
+	}
+	if !clusterReady(c) {
+		c.SetDataSourceStatus(controller.DataSourceStatus{
+			Done:    false,
+			State:   controller.DataSourceStateWaiting,
+			Reason:  corev1alpha1.ReasonDataSourceWaitingForCluster,
+			Message: "Waiting for the TiDB cluster to be ready before restoring",
+		})
+		return nil
+	}
+	if _, err := c.ReconcileDataSource(); err != nil {
+		return fmt.Errorf("reconcile data source: %w", err)
+	}
 	return nil
+}
+
+// clusterReady reports whether every component group has its desired replicas ready.
+func clusterReady(c *controller.Context) bool {
+	pd := &tidbcorev1.PDGroup{}
+	tikv := &tidbcorev1.TiKVGroup{}
+	tidb := &tidbcorev1.TiDBGroup{}
+	if c.Get(pd, c.Name()) != nil || c.Get(tikv, c.Name()) != nil || c.Get(tidb, c.Name()) != nil {
+		return false
+	}
+	return groupIsReady(pd.Spec.Replicas, pd.Status.ReadyReplicas) &&
+		groupIsReady(tikv.Spec.Replicas, tikv.Status.ReadyReplicas) &&
+		groupIsReady(tidb.Spec.Replicas, tidb.Status.ReadyReplicas)
+}
+
+func groupIsReady(desired *int32, ready int32) bool {
+	return desired != nil && *desired > 0 && ready >= *desired
 }
 
 func buildCluster(c *controller.Context) (*tidbcorev1.Cluster, error) {

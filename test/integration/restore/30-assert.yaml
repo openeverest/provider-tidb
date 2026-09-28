@@ -1,0 +1,23 @@
+# The provider must create a br.pingcap.com Restore (snapshot) with inlined S3
+# storage and a BR-format credentials secret.
+apiVersion: br.pingcap.com/v1alpha1
+kind: Restore
+metadata:
+  name: test-restore
+spec:
+  backupType: full
+  restoreMode: snapshot
+  br:
+    cluster: bkp
+    clusterNamespace: ($namespace)
+  s3:
+    provider: aws
+    bucket: test-bucket
+    region: us-east-1
+    endpoint: http://minio.storage:9000
+    secretName: test-restore-br-s3
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-restore-br-s3

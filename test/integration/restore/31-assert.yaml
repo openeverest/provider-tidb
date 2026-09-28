@@ -1,0 +1,7 @@
+# Once the BR Restore reports Complete, the provider surfaces Succeeded on the Restore CR.
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: test-restore
+status:
+  state: Succeeded

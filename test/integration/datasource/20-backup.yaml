@@ -1,0 +1,10 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+metadata:
+  name: src-backup
+spec:
+  origin:
+    type: Instance
+    instanceRef: {name: src}
+  classRef: {name: br}
+  storageRef: {name: s3-store}

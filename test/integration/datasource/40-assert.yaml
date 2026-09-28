@@ -1,0 +1,20 @@
+# Once the clone cluster is ready, the runtime creates the seeding Restore and
+# the provider turns it into a br.pingcap.com Restore.
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: clone-datasource
+spec:
+  instanceRef: {name: clone}
+  dataSource:
+    type: Backup
+    backup:
+      backupRef: {name: src-backup}
+---
+apiVersion: br.pingcap.com/v1alpha1
+kind: Restore
+metadata:
+  name: clone-datasource
+spec:
+  br:
+    cluster: clone
