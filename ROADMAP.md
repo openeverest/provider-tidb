@@ -67,7 +67,7 @@ OpenEverest. Installable via Helm, testable in CI, runnable in the Tilt/k3d dev 
   required storage for stateful components).
 
 **Version bundles:** curate 1–2 TiDB LTS lines (e.g. `v8.5.x`, and one older LTS) as version
-bundles that pin pd/tikv/tidb to the same TiDB version. Exactly one `default: true`.
+bundles that pin pd/tikv/tidb to the same TiDB version. The default is named by `defaultVersion`.
 
 **Lifecycle (`ProviderInterface`):**
 - `Validate` — spec sanity (name length ≤ 37 for the Cluster, resource minimums, replica rules).
