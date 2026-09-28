@@ -1,0 +1,12 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: test-restore
+spec:
+  instanceRef:
+    name: bkp
+  dataSource:
+    type: Backup
+    backup:
+      backupRef:
+        name: test-backup

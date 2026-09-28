@@ -1,0 +1,88 @@
+---
+# Create a new Instance from a backup: an Instance with spec.dataSource pointing
+# at a completed backup is provisioned, seeded via a Restore, and only becomes
+# Ready after the restore completes.
+#
+# The TiDB operator is not deployed; cluster readiness and BR completion are
+# simulated by patching status.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: datasource
+spec:
+  description: |
+    Provision a new Instance pre-seeded from a backup (clone / DR).
+
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get instances.core.openeverest.io -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get backups.backup.openeverest.io,restores.backup.openeverest.io -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get backups.br.pingcap.com,restores.br.pingcap.com -o yaml
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/name=provider-tidb
+        tail: 120
+
+  steps:
+    - name: provider-deployed
+      try:
+        - assert:
+            file: 00-assert.yaml
+
+    - name: source-setup
+      try:
+        - apply:
+            file: 10-source.yaml
+        - assert:
+            file: 10-assert.yaml
+
+    - name: source-backup
+      try:
+        - apply:
+            file: 20-backup.yaml
+        - assert:
+            file: 20-assert.yaml
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch backups.br.pingcap.com/src-backup --subresource status --type merge \
+                -p '{"status":{"phase":"Complete","backupSizeReadable":"1 MB"}}'
+        # The source backup must be Succeeded before it can seed a clone.
+        - assert:
+            resource:
+              apiVersion: backup.openeverest.io/v1alpha1
+              kind: Backup
+              metadata:
+                name: src-backup
+              status:
+                state: Succeeded
+
+    - name: create-clone
+      try:
+        - apply:
+            file: 30-clone.yaml
+        - assert:
+            file: 30-assert.yaml
+
+    - name: clone-cluster-ready
+      try:
+        # Simulate the clone's cluster reaching its desired, up-to-date state so
+        # the runtime creates the seeding Restore.
+        - script:
+            content: |
+              for g in pdgroup tikvgroup tidbgroup; do
+                kubectl -n $NAMESPACE patch $g/clone --subresource status --type merge \
+                  -p '{"status":{"version":"v8.5.2","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=clone"}}'
+              done
+        - assert:
+            file: 40-assert.yaml
+
+    - name: restore-completes
+      try:
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch restores.br.pingcap.com/clone-datasource --subresource status --type merge \
+                -p '{"status":{"phase":"Complete"}}'
+        - assert:
+            file: 50-assert.yaml

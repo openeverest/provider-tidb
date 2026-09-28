@@ -1,0 +1,12 @@
+# The clone's cluster is created and, while seeding, the Instance reports Restoring.
+apiVersion: core.pingcap.com/v1alpha1
+kind: Cluster
+metadata:
+  name: clone
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: clone
+status:
+  phase: Restoring

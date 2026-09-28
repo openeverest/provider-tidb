@@ -21,6 +21,73 @@
     - create
     - patch
 - apiGroups:
+    - backup.openeverest.io
+  resources:
+    - backupclasses
+    - backupstorages
+  verbs:
+    - get
+    - list
+    - watch
+- apiGroups:
+    - backup.openeverest.io
+  resources:
+    - backups
+  verbs:
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - backup.openeverest.io
+  resources:
+    - backups/finalizers
+    - restores/finalizers
+  verbs:
+    - update
+- apiGroups:
+    - backup.openeverest.io
+  resources:
+    - backups/status
+    - restores/status
+  verbs:
+    - get
+    - patch
+    - update
+- apiGroups:
+    - backup.openeverest.io
+  resources:
+    - restores
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - br.pingcap.com
+  resources:
+    - backups
+    - restores
+  verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+- apiGroups:
+    - br.pingcap.com
+  resources:
+    - backups/status
+    - restores/status
+  verbs:
+    - get
+- apiGroups:
     - coordination.k8s.io
   resources:
     - leases

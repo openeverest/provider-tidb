@@ -1,0 +1,7 @@
+# Once the BR Backup reports Complete, the provider surfaces Succeeded on the Backup CR.
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+metadata:
+  name: test-backup
+status:
+  state: Succeeded

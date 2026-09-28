@@ -1,0 +1,78 @@
+---
+# Restore a backup into an existing Instance: SyncRestore produces a
+# br.pingcap.com Restore from the selected backup and reports Succeeded.
+#
+# The TiDB operator is not deployed; BR completion is simulated by patching the
+# BR Backup/Restore status.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: restore
+spec:
+  description: |
+    Restore a completed backup into an existing Instance.
+
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get backups.backup.openeverest.io,restores.backup.openeverest.io -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get backups.br.pingcap.com,restores.br.pingcap.com -o yaml
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/name=provider-tidb
+        tail: 100
+
+  steps:
+    - name: provider-deployed
+      try:
+        - assert:
+            file: 00-assert.yaml
+
+    - name: setup
+      try:
+        - apply:
+            file: 10-setup.yaml
+        - assert:
+            file: 10-assert.yaml
+
+    - name: create-and-complete-backup
+      try:
+        - apply:
+            file: 20-backup.yaml
+        - assert:
+            file: 20-assert.yaml
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch backups.br.pingcap.com/test-backup --subresource status --type merge \
+                -p '{"status":{"phase":"Complete","backupSizeReadable":"1 MB"}}'
+        - assert:
+            file: 21-assert.yaml
+
+    - name: create-restore
+      try:
+        - apply:
+            file: 30-restore.yaml
+        - assert:
+            file: 30-assert.yaml
+
+    - name: restore-succeeds
+      try:
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch restores.br.pingcap.com/test-restore --subresource status --type merge \
+                -p '{"status":{"phase":"Complete"}}'
+        - assert:
+            file: 31-assert.yaml
+
+    - name: delete
+      try:
+        - delete:
+            ref:
+              apiVersion: backup.openeverest.io/v1alpha1
+              kind: Restore
+              name: test-restore
+        - delete:
+            ref:
+              apiVersion: backup.openeverest.io/v1alpha1
+              kind: Backup
+              name: test-backup

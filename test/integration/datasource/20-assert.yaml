@@ -1,0 +1,7 @@
+apiVersion: br.pingcap.com/v1alpha1
+kind: Backup
+metadata:
+  name: src-backup
+spec:
+  br:
+    cluster: src

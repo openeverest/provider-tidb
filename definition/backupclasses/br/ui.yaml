@@ -1,0 +1,11 @@
+# UI rendering hints for the TiDB BR BackupClass, inlined verbatim under
+# spec.uiSchema. On-demand snapshot backups need no extra fields beyond the
+# storage selection the core UI already provides.
+backup:
+  label: Backup Configuration
+  components: {}
+  componentsOrder: []
+restore:
+  label: Restore Configuration
+  components: {}
+  componentsOrder: []
