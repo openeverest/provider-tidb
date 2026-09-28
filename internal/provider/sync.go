@@ -32,7 +32,7 @@ const dataVolumeName = "data"
 // SyncTiDB reconciles the Instance into a TiDB Operator v2 Cluster plus one
 // group per component. The Cluster is owned by the Instance; the component
 // groups are owned by the Cluster so that deleting the Instance cascades
-// through the operator's ordered Cluster teardown (see applyOwnedByCluster).
+// through the operator's ordered Cluster teardown (see applyWithOwner).
 func SyncTiDB(c *controller.Context) error {
 	providerSpec, err := c.ProviderSpec()
 	if err != nil {
@@ -53,12 +53,13 @@ func SyncTiDB(c *controller.Context) error {
 
 	// The Cluster is the shared root and is owned by the Instance, so deleting
 	// the Instance garbage-collects it and the operator's Cluster finalizer then
-	// tears the groups down in the correct order.
+	// tears the groups down in the correct order. It must be applied with
+	// applyWithOwner (not c.Apply) so the operator's finalizer is preserved.
 	cluster, err := buildCluster(c)
 	if err != nil {
 		return err
 	}
-	if err := c.Apply(cluster); err != nil {
+	if err := applyWithOwner(c, c.Instance(), cluster); err != nil {
 		return err
 	}
 	// Re-read the Cluster so its UID is available for the group owner references.
@@ -68,33 +69,40 @@ func SyncTiDB(c *controller.Context) error {
 	}
 
 	pd := comps[common.ComponentPD]
-	if err := applyOwnedByCluster(c, owner, buildPDGroup(c, pd, resolveImage(providerSpec, common.ComponentPD, pd))); err != nil {
+	if err := applyWithOwner(c, owner, buildPDGroup(c, pd, resolveImage(providerSpec, common.ComponentPD, pd))); err != nil {
 		return err
 	}
 
 	tikv := comps[common.ComponentTiKV]
-	if err := applyOwnedByCluster(c, owner, buildTiKVGroup(c, tikv, resolveImage(providerSpec, common.ComponentTiKV, tikv))); err != nil {
+	if err := applyWithOwner(c, owner, buildTiKVGroup(c, tikv, resolveImage(providerSpec, common.ComponentTiKV, tikv))); err != nil {
 		return err
 	}
 
 	tidb := comps[common.ComponentTiDB]
-	if err := applyOwnedByCluster(c, owner, buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))); err != nil {
+	if err := applyWithOwner(c, owner, buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))); err != nil {
 		return err
 	}
 
 	return reconcileDataSource(c)
 }
 
-// applyOwnedByCluster creates or updates a Cluster-scoped resource, setting the
-// Cluster (not the Instance) as its controller owner. Cluster ownership is what
-// makes teardown ordered: deleting the Instance garbage-collects only the
-// Cluster, whose operator finalizer then deletes the groups in sequence and
-// force-clears TiKV's leader-eviction finalizer. Instance ownership would GC
-// every group at once, killing PD mid-eviction and deadlocking TiKV on its
-// "leaders are not all evicted" finalizer.
-func applyOwnedByCluster(c *controller.Context, cluster *tidbcorev1.Cluster, obj client.Object) error {
-	if err := controllerutil.SetControllerReference(cluster, obj, c.Client().Scheme()); err != nil {
-		return fmt.Errorf("set cluster owner: %w", err)
+// applyWithOwner creates or updates obj with the given controller owner,
+// preserving any finalizers the operator has added.
+//
+// Ordered teardown depends on two things this helper guarantees:
+//   - The component groups are owned by the Cluster (not the Instance), so
+//     deleting the Instance garbage-collects only the Cluster. While the
+//     Cluster is held by its finalizer, its Cluster-owned groups are not
+//     concurrently garbage-collected; the operator deletes them in sequence.
+//     Instance ownership would GC every group at once, killing PD mid-eviction
+//     and deadlocking TiKV on its "leaders are not all evicted" finalizer.
+//   - The operator's finalizer (e.g. pingcap.com/finalizer) is preserved on
+//     update. A blind replace would strip it, so deleting the Cluster would
+//     hard-delete it instead of triggering the operator's ordered teardown,
+//     orphaning the groups (their controllers fail with "cannot get cluster").
+func applyWithOwner(c *controller.Context, owner, obj client.Object) error {
+	if err := controllerutil.SetControllerReference(owner, obj, c.Client().Scheme()); err != nil {
+		return fmt.Errorf("set owner: %w", err)
 	}
 	existing := obj.DeepCopyObject().(client.Object)
 	err := c.Client().Get(c.Context(), client.ObjectKeyFromObject(obj), existing)
@@ -104,6 +112,7 @@ func applyOwnedByCluster(c *controller.Context, cluster *tidbcorev1.Cluster, obj
 	if err != nil {
 		return err
 	}
+	obj.SetFinalizers(existing.GetFinalizers())
 	obj.SetResourceVersion(existing.GetResourceVersion())
 	return c.Client().Update(c.Context(), obj)
 }
