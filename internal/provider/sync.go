@@ -2,12 +2,19 @@ package provider
 
 import (
 	"fmt"
+	"reflect"
+	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/structured-merge-diff/v6/value"
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
@@ -33,7 +40,7 @@ const dataVolumeName = "data"
 // SyncTiDB reconciles the Instance into a TiDB Operator v2 Cluster plus one
 // group per component. The Cluster is owned by the Instance; the component
 // groups are owned by the Cluster so that deleting the Instance cascades
-// through the operator's ordered Cluster teardown (see applyWithOwner).
+// through the operator's ordered Cluster teardown (see applyOwnedByCluster).
 func SyncTiDB(c *controller.Context) error {
 	providerSpec, err := c.ProviderSpec()
 	if err != nil {
@@ -52,15 +59,15 @@ func SyncTiDB(c *controller.Context) error {
 		return err
 	}
 
-	// The Cluster is the shared root and is owned by the Instance, so deleting
-	// the Instance garbage-collects it and the operator's Cluster finalizer then
-	// tears the groups down in the correct order. It must be applied with
-	// applyWithOwner (not c.Apply) so the operator's finalizer is preserved.
+	// The Cluster is owned by the Instance (via c.Apply). Server-side apply only
+	// manages the fields this provider sets, so the operator's own fields —
+	// including its finalizer — stay intact and deleting the Instance triggers
+	// the operator's ordered Cluster teardown.
 	cluster, err := buildCluster(c)
 	if err != nil {
 		return err
 	}
-	if err := applyWithOwner(c, c.Instance(), cluster); err != nil {
+	if err := c.Apply(cluster); err != nil {
 		return err
 	}
 	// Re-read the Cluster so its UID is available for the group owner references.
@@ -70,17 +77,17 @@ func SyncTiDB(c *controller.Context) error {
 	}
 
 	pd := comps[common.ComponentPD]
-	if err := applyWithOwner(c, owner, buildPDGroup(c, pd, resolveImage(providerSpec, common.ComponentPD, pd))); err != nil {
+	if err := applyOwnedByCluster(c, owner, buildPDGroup(c, pd, resolveImage(providerSpec, common.ComponentPD, pd))); err != nil {
 		return err
 	}
 
 	tikv := comps[common.ComponentTiKV]
-	if err := applyWithOwner(c, owner, buildTiKVGroup(c, tikv, resolveImage(providerSpec, common.ComponentTiKV, tikv))); err != nil {
+	if err := applyOwnedByCluster(c, owner, buildTiKVGroup(c, tikv, resolveImage(providerSpec, common.ComponentTiKV, tikv))); err != nil {
 		return err
 	}
 
 	tidb := comps[common.ComponentTiDB]
-	if err := applyWithOwner(c, owner, buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))); err != nil {
+	if err := applyOwnedByCluster(c, owner, buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))); err != nil {
 		return err
 	}
 
@@ -95,7 +102,7 @@ func SyncTiDB(c *controller.Context) error {
 // once disabled; the operator offlines each TiFlash store before removing it.
 func syncTiFlash(c *controller.Context, providerSpec *corev1alpha1.ProviderSpec, owner *tidbcorev1.Cluster) error {
 	if tiflash, ok := enabledTiFlash(c.Instance().Spec.Components); ok {
-		return applyWithOwner(c, owner, buildTiFlashGroup(c, tiflash, resolveImage(providerSpec, common.ComponentTiFlash, tiflash)))
+		return applyOwnedByCluster(c, owner, buildTiFlashGroup(c, tiflash, resolveImage(providerSpec, common.ComponentTiFlash, tiflash)))
 	}
 	group := &tidbcorev1.TiFlashGroup{}
 	found, err := c.Exists(group, c.Name())
@@ -118,35 +125,138 @@ func enabledTiFlash(comps map[string]corev1alpha1.ComponentSpec) (corev1alpha1.C
 	return comp, true
 }
 
-// applyWithOwner creates or updates obj with the given controller owner,
-// preserving any finalizers the operator has added.
+// applyOwnedByCluster server-side applies obj with the Cluster as its controller
+// owner. The runtime's c.Apply always owns objects by the Instance, but the
+// component groups must be owned by the Cluster: deleting the Instance then
+// garbage-collects only the Cluster, whose operator finalizer tears the groups
+// down in order. Owning the groups by the Instance would garbage-collect them
+// all at once, killing PD mid-eviction and deadlocking TiKV on its "leaders are
+// not all evicted" finalizer.
 //
-// Ordered teardown depends on two things this helper guarantees:
-//   - The component groups are owned by the Cluster (not the Instance), so
-//     deleting the Instance garbage-collects only the Cluster. While the
-//     Cluster is held by its finalizer, its Cluster-owned groups are not
-//     concurrently garbage-collected; the operator deletes them in sequence.
-//     Instance ownership would GC every group at once, killing PD mid-eviction
-//     and deadlocking TiKV on its "leaders are not all evicted" finalizer.
-//   - The operator's finalizer (e.g. pingcap.com/finalizer) is preserved on
-//     update. A blind replace would strip it, so deleting the Cluster would
-//     hard-delete it instead of triggering the operator's ordered teardown,
-//     orphaning the groups (their controllers fail with "cannot get cluster").
-func applyWithOwner(c *controller.Context, owner, obj client.Object) error {
-	if err := controllerutil.SetControllerReference(owner, obj, c.Client().Scheme()); err != nil {
-		return fmt.Errorf("set owner: %w", err)
+// It mirrors the runtime's server-side apply (drop status, nulls and implicit
+// empty structs, force ownership) so it claims only the fields the provider
+// sets and leaves the operator's fields — including its finalizer — untouched.
+func applyOwnedByCluster(c *controller.Context, cluster, obj client.Object) error {
+	if err := controllerutil.SetControllerReference(cluster, obj, c.Client().Scheme()); err != nil {
+		return fmt.Errorf("set cluster owner: %w", err)
 	}
-	existing := obj.DeepCopyObject().(client.Object)
-	err := c.Client().Get(c.Context(), client.ObjectKeyFromObject(obj), existing)
-	if apierrors.IsNotFound(err) {
-		return c.Client().Create(c.Context(), obj)
-	}
+	gvk, err := apiutil.GVKForObject(obj, c.Client().Scheme())
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve GVK for apply: %w", err)
 	}
-	obj.SetFinalizers(existing.GetFinalizers())
-	obj.SetResourceVersion(existing.GetResourceVersion())
-	return c.Client().Update(c.Context(), obj)
+	obj.GetObjectKind().SetGroupVersionKind(gvk)
+
+	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		return fmt.Errorf("build apply configuration: %w", err)
+	}
+	delete(raw, "status")
+	pruneNulls(raw)
+	pruneEmptyStructs(reflect.ValueOf(obj), raw)
+	return c.Client().Apply(c.Context(),
+		client.ApplyConfigurationFromUnstructured(&unstructured.Unstructured{Object: raw}),
+		client.FieldOwner("provider-"+common.ProviderName),
+		client.ForceOwnership,
+	)
+}
+
+// pruneNulls drops null values so server-side apply does not claim unset fields,
+// matching the runtime's c.Apply.
+func pruneNulls(v any) {
+	switch val := v.(type) {
+	case map[string]any:
+		for k, child := range val {
+			if child == nil {
+				delete(val, k)
+				continue
+			}
+			pruneNulls(child)
+		}
+	case []any:
+		for _, child := range val {
+			pruneNulls(child)
+		}
+	}
+}
+
+// pruneEmptyStructs drops the {} ToUnstructured emits for empty non-pointer
+// omitempty structs (e.g. a group's resources once CPU and memory are cleared),
+// matching the runtime's c.Apply (openeverest#3282). Otherwise SSA prunes the
+// children, the API server stores null, and the CRD rejects the whole apply.
+// A non-nil pointer keeps its {} (emptyDir: {} selects a volume type).
+func pruneEmptyStructs(v reflect.Value, raw any) {
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return
+		}
+		v = v.Elem()
+	}
+	// Custom marshalers (Quantity, Time, RawExtension) decide their own shape.
+	if !v.IsValid() || value.TypeReflectEntryOf(v.Type()).CanConvertToUnstructured() {
+		return
+	}
+
+	switch r := raw.(type) {
+	case map[string]any:
+		if v.Kind() == reflect.Struct {
+			pruneStructFields(v, r)
+			return
+		}
+		pruneMapValues(v, r)
+	case []any:
+		if (v.Kind() == reflect.Slice || v.Kind() == reflect.Array) && v.Len() == len(r) {
+			for i := range r {
+				pruneEmptyStructs(v.Index(i), r[i])
+			}
+		}
+	}
+}
+
+func pruneStructFields(v reflect.Value, m map[string]any) {
+	for i := range v.NumField() {
+		field := v.Type().Field(i)
+		name, omitempty := jsonField(field)
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			pruneEmptyStructs(v.Field(i), m)
+			continue
+		}
+		child, ok := m[name]
+		if !ok {
+			continue
+		}
+		pruneEmptyStructs(v.Field(i), child)
+		if childMap, isMap := child.(map[string]any); isMap && len(childMap) == 0 && omitempty && isPlainStruct(field.Type) {
+			delete(m, name)
+		}
+	}
+}
+
+func pruneMapValues(v reflect.Value, m map[string]any) {
+	if v.Kind() != reflect.Map || v.Type().Key().Kind() != reflect.String {
+		return
+	}
+	for it := v.MapRange(); it.Next(); {
+		if child, ok := m[it.Key().String()]; ok {
+			pruneEmptyStructs(it.Value(), child)
+		}
+	}
+}
+
+func isPlainStruct(t reflect.Type) bool {
+	return t.Kind() == reflect.Struct && !value.TypeReflectEntryOf(t).CanConvertToUnstructured()
+}
+
+// jsonField returns a field's key as runtime.DefaultUnstructuredConverter
+// names it ("" when inlined) and whether it is tagged omitempty.
+func jsonField(f reflect.StructField) (string, bool) {
+	name, opts, _ := strings.Cut(f.Tag.Get("json"), ",")
+	if name == "" && !f.Anonymous {
+		name = f.Name
+	}
+	return name, slices.Contains(strings.Split(opts, ","), "omitempty")
 }
 
 // reconcileDataSource seeds a new Instance from .spec.dataSource once the
