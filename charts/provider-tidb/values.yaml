@@ -153,9 +153,10 @@ crds:
 # -- Instance presets offered when creating a TiDB Instance.
 # Each preset must have 'name', 'enabled', and 'spec' fields; 'spec' is the full
 # InstancePresetSpec and is copied verbatim into the new Instance. Rendered as
-# InstancePreset '<shortName>-<name>'. No preset pins a version, so Instances
-# get the provider's default version bundle. CPU stays in whole cores: the API
-# serves fractions as millicores ("500m"), which the UI's numeric field can't read.
+# InstancePreset '<shortName>-<name>'. Presets pin the default version bundle so
+# the new Instance shows its version (presets_test.go keeps them in sync). CPU
+# stays in whole cores: the API serves fractions as millicores ("500m"), which
+# the UI's numeric field can't read.
 presets:
   # Smallest working cluster, for a laptop or a CI job. One node per component,
   # with PD told to keep a single copy of the data so it doesn't wait for
@@ -165,6 +166,7 @@ presets:
     spec:
       providerRef:
         name: tidb
+      version: "8.5.2"
       topology:
         type: cluster
       components:
@@ -198,6 +200,7 @@ presets:
     spec:
       providerRef:
         name: tidb
+      version: "8.5.2"
       topology:
         type: cluster
       components:
@@ -227,6 +230,7 @@ presets:
     spec:
       providerRef:
         name: tidb
+      version: "8.5.2"
       topology:
         type: cluster
       components:
