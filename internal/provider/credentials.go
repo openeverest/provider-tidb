@@ -43,7 +43,7 @@ func ensureRootPassword(c *controller.Context) (string, error) {
 		return "", fmt.Errorf("reading root password secret: %w", err)
 	}
 
-	password, err := generatePassword(rootPasswordLength)
+	password, err := newRootPassword()
 	if err != nil {
 		return "", err
 	}
@@ -79,6 +79,9 @@ func buildBootstrapSQLConfigMap(c *controller.Context, password string) *corev1.
 		},
 	}
 }
+
+// newRootPassword is a variable so tests can make Sync's output deterministic.
+var newRootPassword = func() (string, error) { return generatePassword(rootPasswordLength) }
 
 // generatePassword returns a cryptographically random alphanumeric string.
 func generatePassword(n int) (string, error) {

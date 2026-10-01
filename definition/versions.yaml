@@ -1,5 +1,5 @@
 # Component type version catalog.
-# Each component type (pd, tikv, tidb) tracks the same TiDB release; the image
+# Each component type (pd, tikv, tidb, tiflash) tracks the same TiDB release; the image
 # tag equals the version. Name the default version per type via `defaultVersion`.
 #
 # The top-level `versions:` bundles are what a user selects via
@@ -28,6 +28,13 @@ componentTypes:
               image: pingcap/tidb:v8.5.2
             - version: v7.5.5
               image: pingcap/tidb:v7.5.5
+    tiflash:
+        defaultVersion: v8.5.2
+        versions:
+            - version: v8.5.2
+              image: pingcap/tiflash:v8.5.2
+            - version: v7.5.5
+              image: pingcap/tiflash:v7.5.5
 
 defaultVersion: "8.5.2"
 versions:
@@ -36,8 +43,10 @@ versions:
           pd: v8.5.2
           tikv: v8.5.2
           tidb: v8.5.2
+          tiflash: v8.5.2
     - name: "7.5.5"
       components:
           pd: v7.5.5
           tikv: v7.5.5
           tidb: v7.5.5
+          tiflash: v7.5.5

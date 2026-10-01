@@ -1,0 +1,30 @@
+# The provider creates a TiFlashGroup in the same cluster, owned by the Cluster,
+# with a data volume and the bundle's version.
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiFlashGroup
+metadata:
+  name: test-instance
+  ownerReferences:
+    - apiVersion: core.pingcap.com/v1alpha1
+      kind: Cluster
+      name: test-instance
+spec:
+  cluster:
+    name: test-instance
+  replicas: 1
+  template:
+    spec:
+      version: v8.5.2
+      volumes:
+        - name: data
+          storage: 15Gi
+          mounts:
+            - type: data
+---
+# The Instance is not Ready until the TiFlash nodes are.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+status:
+  phase: Updating

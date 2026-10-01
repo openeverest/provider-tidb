@@ -17,7 +17,7 @@ spec:
     - script:
         content: kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o yaml
     - script:
-        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup -o yaml
+        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,tiflashgroup -o yaml
     - podLogs:
         namespace: provider-system
         selector: app.kubernetes.io/name=provider-tidb
@@ -75,6 +75,28 @@ spec:
             content: |
               kubectl -n $NAMESPACE patch tikvgroup/test-instance --subresource status --type merge \
                 -p '{"status":{"updateRevision":"rev-2","currentRevision":"rev-2","updatedReplicas":1}}'
+        - assert:
+            file: 11-assert.yaml
+
+    - name: enable-tiflash
+      try:
+        - patch:
+            file: 15-enable-tiflash.yaml
+        - assert:
+            file: 15-assert.yaml
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch tiflashgroup/test-instance --subresource status --type merge \
+                -p '{"status":{"version":"v8.5.2","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=test-instance"}}'
+        - assert:
+            file: 11-assert.yaml
+
+    - name: disable-tiflash
+      try:
+        - patch:
+            file: 16-disable-tiflash.yaml
+        - error:
+            file: 16-error.yaml
         - assert:
             file: 11-assert.yaml
 

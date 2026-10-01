@@ -25,3 +25,9 @@ type TidbParameters struct {
 	// Config is the inline TOML configuration file for TiDB.
 	Config string `json:"config,omitempty"`
 }
+
+// TiflashParameters defines the parameters for tiflash (columnar storage) components.
+type TiflashParameters struct {
+	// Config is the inline TOML configuration file for TiFlash.
+	Config string `json:"config,omitempty"`
+}

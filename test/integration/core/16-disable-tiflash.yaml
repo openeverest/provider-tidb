@@ -1,0 +1,9 @@
+# Zero TiFlash replicas disables TiFlash: the group is removed.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  components:
+    tiflash:
+      replicas: 0

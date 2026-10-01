@@ -22,14 +22,15 @@ the native custom resources of an upstream Kubernetes operator. This repository 
 for TiDB: it owns the technology-specific knowledge — components, topologies, versions and
 parameters — so that users, the API server, and the UI stay technology-agnostic.
 
-A TiDB cluster is composed of three mandatory components, each reconciled into its own
-TiDB Operator v2 resource:
+A TiDB cluster is composed of three mandatory components plus optional TiFlash, each reconciled
+into its own TiDB Operator v2 resource:
 
 | Component | Role | Operator resource |
 |---|---|---|
 | `pd` | Placement Driver — metadata, timestamps (TSO), scheduling | `PDGroup` |
 | `tikv` | Distributed key-value storage engine | `TiKVGroup` |
 | `tidb` | Stateless SQL layer (MySQL protocol) | `TiDBGroup` |
+| `tiflash` *(optional)* | Columnar replicas for analytical queries (HTAP) | `TiFlashGroup` |
 
 > [!IMPORTANT]
 > **This provider is not standalone.** It requires an OpenEverest installation (core CRDs and
@@ -66,7 +67,7 @@ is covered under [Installation](#installation).
 
 | Capability | Status | Notes |
 |---|---|---|
-| Provisioning | ✅ | PD + TiKV + TiDB |
+| Provisioning | ✅ | PD + TiKV + TiDB, optionally TiFlash |
 | Horizontal scaling | ✅ | Per-component `replicas` |
 | Vertical scaling (CPU / memory) | ✅ | Per-component `resources` |
 | Custom configuration | ✅ | Inline TOML `config` per component |
@@ -74,7 +75,7 @@ is covered under [Installation](#installation).
 | Monitoring | ❌ | Planned |
 | TLS | ❌ | Planned |
 
-Stateful components (PD, TiKV) additionally report:
+Stateful components (PD, TiKV, TiFlash) additionally report:
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -88,11 +89,22 @@ Stateful components (PD, TiKV) additionally report:
 See [ROADMAP.md](ROADMAP.md) for the planned work.
 
 > [!IMPORTANT]
-> Growing `spec.components.{pd,tikv}.storage.size` resizes the existing PVCs in place, which only
+> Growing `spec.components.{pd,tikv,tiflash}.storage.size` resizes the existing PVCs in place, which only
 > works if their StorageClass sets `allowVolumeExpansion: true`
 > (`kubectl get storageclass <name> -o jsonpath='{.allowVolumeExpansion}'`). On a StorageClass
 > without it — e.g. the k3s/kind `local-path` default — the TiDB Operator leaves the volumes at their
 > old size. Volumes can never be shrunk; `Validate` rejects a smaller size.
+
+> [!IMPORTANT]
+> **TiFlash** runs while `spec.components.tiflash` is present with a replica count other than `0`
+> (the UI defaults to `0`). Tables are only copied to TiFlash once you ask for it, e.g.
+> `ALTER TABLE t SET TIFLASH REPLICA 1`. Setting the replica count to `0` (or removing the
+> component) deletes the TiFlash nodes after the operator takes their stores offline. A store
+> can't go offline while tables still need more TiFlash replicas than the nodes left, so run
+> `ALTER TABLE ... SET TIFLASH REPLICA 0` on those tables before scaling TiFlash in or turning it off.
+> PD also refuses to remove a store if fewer stores than its `max-replicas` (3 by default) would be
+> left, so a cluster with fewer TiKV nodes than that can't turn TiFlash off.
+> The Instance reports `Updating` with `tiflash (removing)` until the nodes are gone.
 
 ## Installation
 

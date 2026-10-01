@@ -34,6 +34,18 @@ func validateStorage(c *controller.Context) error {
 		}
 	}
 
+	// A disabled TiFlash is about to be removed, so its size no longer matters.
+	if tiflashSpec, enabled := enabledTiFlash(comps); enabled {
+		tiflash := &tidbcorev1.TiFlashGroup{}
+		if found, err := c.Exists(tiflash, c.Name()); err != nil {
+			return fmt.Errorf("reading current tiflash storage: %w", err)
+		} else if found {
+			if err := checkNoShrink(common.ComponentTiFlash, tiflash.Spec.Template.Spec.Volumes, tiflashSpec.Storage); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 

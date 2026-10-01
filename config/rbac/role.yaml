@@ -146,6 +146,7 @@ rules:
   - clusters
   - pdgroups
   - tidbgroups
+  - tiflashgroups
   - tikvgroups
   verbs:
   - create
@@ -161,6 +162,7 @@ rules:
   - clusters/status
   - pdgroups/status
   - tidbgroups/status
+  - tiflashgroups/status
   - tikvgroups/status
   verbs:
   - get
@@ -169,6 +171,7 @@ rules:
   resources:
   - pds
   - tidbs
+  - tiflashes
   - tikvs
   verbs:
   - get

@@ -44,6 +44,21 @@ func StatusTiDB(c *controller.Context) (controller.Status, error) {
 		{component: common.ComponentTiKV, replicas: tikv.Spec.Replicas, version: tikv.Spec.Template.Spec.Version, commonStatus: tikv.Status.CommonStatus, groupStatus: tikv.Status.GroupStatus},
 		{component: common.ComponentTiDB, replicas: tidb.Spec.Replicas, version: tidb.Spec.Template.Spec.Version, commonStatus: tidb.Status.CommonStatus, groupStatus: tidb.Status.GroupStatus},
 	}
+	tiflash := &tidbcorev1.TiFlashGroup{}
+	found, err := c.Exists(tiflash, c.Name())
+	if err != nil {
+		return controller.Status{}, fmt.Errorf("get tiflash group: %w", err)
+	}
+	_, tiflashEnabled := enabledTiFlash(c.Instance().Spec.Components)
+	switch {
+	case tiflashEnabled && !found:
+		return controller.Provisioning("Waiting for TiFlash group to be created"), nil
+	case found:
+		groups = append(groups, groupRollout{
+			component: common.ComponentTiFlash, replicas: tiflash.Spec.Replicas, version: tiflash.Spec.Template.Spec.Version,
+			commonStatus: tiflash.Status.CommonStatus, groupStatus: tiflash.Status.GroupStatus, removing: !tiflashEnabled,
+		})
+	}
 	problems, err := instanceProblems(c)
 	if err != nil {
 		return controller.Status{}, err
@@ -70,6 +85,8 @@ type groupRollout struct {
 	// problem is the most severe issue the operator reports on one of the
 	// group's instances, if any.
 	problem componentProblem
+	// removing marks a group the Instance no longer wants, still being torn down.
+	removing bool
 }
 
 type componentProblem struct {
@@ -81,7 +98,7 @@ type componentProblem struct {
 // converged mirrors the operator's IsGroupHealthyAndUpToDate minus observedGeneration,
 // which churns while Context.Apply is a full Update (openeverest#3240).
 func (g groupRollout) converged() bool {
-	if g.replicas == nil || *g.replicas == 0 {
+	if g.removing || g.replicas == nil || *g.replicas == 0 {
 		return false
 	}
 	desired := *g.replicas
@@ -95,15 +112,18 @@ func (g groupRollout) converged() bool {
 }
 
 func (g groupRollout) desired() int32 {
-	if g.replicas == nil {
+	if g.removing || g.replicas == nil {
 		return 0
 	}
 	return *g.replicas
 }
 
-// summary reads e.g. "tikv (2/3 ready: <operator reason>)".
+// summary reads e.g. "tikv (2/3 ready: <operator reason>)" or "tiflash (removing)".
 func (g groupRollout) summary() string {
 	counts := fmt.Sprintf("%d/%d ready", g.groupStatus.ReadyReplicas, g.desired())
+	if g.removing {
+		counts = "removing"
+	}
 	reason := g.problem.message
 	if reason == "" {
 		if cond := meta.FindStatusCondition(g.commonStatus.Conditions, tidbcorev1.CondReady); cond != nil &&
@@ -166,8 +186,8 @@ func evaluateStatus(previous corev1alpha1.InstancePhase, groups []groupRollout) 
 	return status
 }
 
-// instanceProblems reads the conditions the operator keeps on each PD, TiKV
-// and TiDB instance and returns the most severe problem per component.
+// instanceProblems reads the conditions the operator keeps on each PD, TiKV,
+// TiDB and TiFlash instance and returns the most severe problem per component.
 func instanceProblems(c *controller.Context) (map[string]componentProblem, error) {
 	inCluster := client.MatchingLabels{tidbcorev1.LabelKeyCluster: c.Name()}
 	problems := map[string]componentProblem{}
@@ -194,6 +214,14 @@ func instanceProblems(c *controller.Context) (map[string]componentProblem, error
 	}
 	for i := range tidbs.Items {
 		recordProblem(problems, common.ComponentTiDB, tidbs.Items[i].Name, tidbs.Items[i].Status.Conditions)
+	}
+
+	tiflashes := &tidbcorev1.TiFlashList{}
+	if err := c.List(tiflashes, inCluster); err != nil {
+		return nil, fmt.Errorf("listing tiflash instances: %w", err)
+	}
+	for i := range tiflashes.Items {
+		recordProblem(problems, common.ComponentTiFlash, tiflashes.Items[i].Name, tiflashes.Items[i].Status.Conditions)
 	}
 
 	return problems, nil
