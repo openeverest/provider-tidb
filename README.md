@@ -214,21 +214,38 @@ mysql -h my-tidb-tidb.<namespace> -P 4000 -u root -p"$(kubectl get secret my-tid
 > yields two `TiDB` resources (`kubectl get tidb`) and two pods, all belonging to one `TiDBGroup`
 > (`kubectl get tidbgroup`). This mirrors how a Deployment owns its Pods.
 
+### Presets
+
+The chart ships `InstancePreset`s, so the UI can create a working cluster in one click:
+
+| Preset | PD | TiKV | TiDB | TiFlash | Use it for |
+|---|---|---|---|---|---|
+| `tidb-dev` | 1 | 1 | 1 | — | A laptop or CI: the smallest cluster that runs (about 4 GiB) |
+| `tidb-standard` | 3 | 3 | 2 | — | A highly available transactional database |
+| `tidb-analytics` | 3 | 3 | 2 | 2 | Transactions plus analytics on the same data |
+
+`tidb-dev` has no redundancy and sets PD's `max-replicas` to `1`, so PD stops trying to place
+three copies of the data on its single TiKV node. To try TiFlash on it, add a `tiflash`
+component with at least 4 GiB of memory; TiFlash is killed for running out of memory at 3 GiB.
+Presets don't pin a version, so they use the default version bundle. Sizes and the list itself
+live under `presets:` in [values.yaml](charts/provider-tidb/values.yaml); set `enabled: false`
+to hide one.
+
 ## Topologies
 
 | Topology | Default | Description |
 |---|---|---|
-| `cluster` | ✅ | Standard distributed TiDB: PD + TiKV + TiDB |
+| `cluster` | ✅ | Standard distributed TiDB: PD + TiKV + TiDB, optionally TiFlash |
 
 ## Versions
 
 | Version bundle | Default | Components |
 |---|---|---|
-| `8.5.2` | ✅ | PD / TiKV / TiDB `v8.5.2` |
-| `7.5.5` |  | PD / TiKV / TiDB `v7.5.5` |
+| `8.5.2` | ✅ | PD / TiKV / TiDB / TiFlash `v8.5.2` |
+| `7.5.5` |  | PD / TiKV / TiDB / TiFlash `v7.5.5` |
 
-Source of truth: [definition/versions.yaml](definition/versions.yaml). Each bundle pins PD, TiKV
-and TiDB to the same TiDB release; the user selects one via `Instance.spec.version`.
+Source of truth: [definition/versions.yaml](definition/versions.yaml). Each bundle pins every
+component to the same TiDB release; the user selects one via `Instance.spec.version`.
 
 ## Configuration
 

@@ -150,28 +150,111 @@ crds:
   # -- Job backoff limit for the install hook.
   backoffLimit: 3
 
-# -- Default instance presets configuration
-# Each preset must have 'name', 'enabled', and 'spec' fields.
-# The 'spec' field contains the full InstancePresetSpec.
-# Note: The provider shortName will be automatically added to each preset name.
-presets: []
-  # Example preset structure:
-  # - name: standalone
-  #   enabled: true
-  #   spec:
-  #     provider: tidb
-  #     version: 1.0.0
-  #     topology:
-  #       type: standalone
-  #     components:
-  #       engine:
-  #         replicas: 1
-  #         resources:
-  #           limits:
-  #             cpu: "1"
-  #             memory: 2Gi
-  #         storage:
-  #           size: 10Gi
+# -- Instance presets offered when creating a TiDB Instance.
+# Each preset must have 'name', 'enabled', and 'spec' fields; 'spec' is the full
+# InstancePresetSpec and is copied verbatim into the new Instance. Rendered as
+# InstancePreset '<shortName>-<name>'. No preset pins a version, so Instances
+# get the provider's default version bundle.
+presets:
+  # Smallest working cluster, for a laptop or a CI job. One node per component,
+  # with PD told to keep a single copy of the data so it doesn't wait for
+  # replicas that can never be placed. Not for production: no redundancy.
+  - name: dev
+    enabled: true
+    spec:
+      providerRef:
+        name: tidb
+      topology:
+        type: cluster
+      components:
+        pd:
+          type: pd
+          replicas: 1
+          resources:
+            limits: {cpu: 500m, memory: 1Gi}
+          storage:
+            size: 2Gi
+          parameters:
+            config: |
+              [replication]
+              max-replicas = 1
+        tikv:
+          type: tikv
+          replicas: 1
+          resources:
+            limits: {cpu: "1", memory: 2Gi}
+          storage:
+            size: 10Gi
+        tidb:
+          type: tidb
+          replicas: 1
+          resources:
+            limits: {cpu: 500m, memory: 1Gi}
+  # Highly available transactional cluster: three PD and TiKV nodes so the
+  # cluster survives losing one, and two SQL nodes behind the TiDB service.
+  - name: standard
+    enabled: true
+    spec:
+      providerRef:
+        name: tidb
+      topology:
+        type: cluster
+      components:
+        pd:
+          type: pd
+          replicas: 3
+          resources:
+            limits: {cpu: "2", memory: 4Gi}
+          storage:
+            size: 20Gi
+        tikv:
+          type: tikv
+          replicas: 3
+          resources:
+            limits: {cpu: "4", memory: 16Gi}
+          storage:
+            size: 100Gi
+        tidb:
+          type: tidb
+          replicas: 2
+          resources:
+            limits: {cpu: "4", memory: 8Gi}
+  # The standard cluster plus two TiFlash nodes, so tables can keep two
+  # columnar replicas for analytical queries (HTAP).
+  - name: analytics
+    enabled: true
+    spec:
+      providerRef:
+        name: tidb
+      topology:
+        type: cluster
+      components:
+        pd:
+          type: pd
+          replicas: 3
+          resources:
+            limits: {cpu: "2", memory: 4Gi}
+          storage:
+            size: 20Gi
+        tikv:
+          type: tikv
+          replicas: 3
+          resources:
+            limits: {cpu: "4", memory: 16Gi}
+          storage:
+            size: 100Gi
+        tidb:
+          type: tidb
+          replicas: 2
+          resources:
+            limits: {cpu: "4", memory: 8Gi}
+        tiflash:
+          type: tiflash
+          replicas: 2
+          resources:
+            limits: {cpu: "4", memory: 16Gi}
+          storage:
+            size: 100Gi
 
 # -- Additional environment variables to set on the provider container
 extraEnv: []
