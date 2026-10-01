@@ -176,9 +176,22 @@ ui:
                         celExpressions:
                           - celExpr: "spec.components.tikv.storage.size >= original.spec.components.tikv.storage.size"
                             message: "Disk size cannot be decreased"
+            storageClass:
+              uiType: select
+              path: spec.components.tikv.storage.storageClass
+              fieldParams:
+                label: "Storage class"
+                modes:
+                  edit:
+                    disabled: true
+                  restore:
+                    disabled: true
+              dataSource:
+                provider: storageClasses
           componentsOrder:
             - replicas
             - resources
+            - storageClass
     tiflash:
       label: "Analytics (TiFlash)"
       description: "Optional columnar replicas that serve analytical queries on live data."
@@ -234,9 +247,22 @@ ui:
                     min: 1
                     int: true
                     required: true
+            storageClass:
+              uiType: select
+              path: spec.components.tiflash.storage.storageClass
+              fieldParams:
+                label: "Storage class"
+                modes:
+                  edit:
+                    disabled: true
+                  restore:
+                    disabled: true
+              dataSource:
+                provider: storageClasses
           componentsOrder:
             - replicas
             - resources
+            - storageClass
     pd:
       label: "Placement Driver (PD)"
       description: "Metadata, timestamp and scheduling nodes. Use an odd number for quorum."
@@ -300,49 +326,26 @@ ui:
                         celExpressions:
                           - celExpr: "spec.components.pd.storage.size >= original.spec.components.pd.storage.size"
                             message: "Disk size cannot be decreased"
+            storageClass:
+              uiType: select
+              path: spec.components.pd.storage.storageClass
+              fieldParams:
+                label: "Storage class"
+                modes:
+                  edit:
+                    disabled: true
+                  restore:
+                    disabled: true
+              dataSource:
+                provider: storageClasses
           componentsOrder:
             - replicas
             - resources
+            - storageClass
     advanced:
       label: "Advanced configuration"
-      description: "Storage classes and per-component configuration overrides."
+      description: "Per-component configuration overrides."
       components:
-        tikvStorageClass:
-          uiType: select
-          path: spec.components.tikv.storage.storageClass
-          fieldParams:
-            label: "TiKV storage class"
-            modes:
-              edit:
-                disabled: true
-              restore:
-                disabled: true
-          dataSource:
-            provider: storageClasses
-        pdStorageClass:
-          uiType: select
-          path: spec.components.pd.storage.storageClass
-          fieldParams:
-            label: "PD storage class"
-            modes:
-              edit:
-                disabled: true
-              restore:
-                disabled: true
-          dataSource:
-            provider: storageClasses
-        tiflashStorageClass:
-          uiType: select
-          path: spec.components.tiflash.storage.storageClass
-          fieldParams:
-            label: "TiFlash storage class"
-            modes:
-              edit:
-                disabled: true
-              restore:
-                disabled: true
-          dataSource:
-            provider: storageClasses
         tidbConfig:
           uiType: text
           path: spec.components.tidb.parameters.config
@@ -376,9 +379,6 @@ ui:
             minRows: 3
             maxRows: 8
       componentsOrder:
-        - tikvStorageClass
-        - pdStorageClass
-        - tiflashStorageClass
         - tidbConfig
         - tikvConfig
         - pdConfig

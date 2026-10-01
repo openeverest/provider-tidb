@@ -120,18 +120,6 @@ spec:
                 multiline: true
               path: spec.components.pd.parameters.config
               uiType: text
-            pdStorageClass:
-              dataSource:
-                provider: storageClasses
-              fieldParams:
-                label: PD storage class
-                modes:
-                  edit:
-                    disabled: true
-                  restore:
-                    disabled: true
-              path: spec.components.pd.storage.storageClass
-              uiType: select
             tidbConfig:
               fieldParams:
                 label: TiDB configuration (TOML)
@@ -148,18 +136,6 @@ spec:
                 multiline: true
               path: spec.components.tiflash.parameters.config
               uiType: text
-            tiflashStorageClass:
-              dataSource:
-                provider: storageClasses
-              fieldParams:
-                label: TiFlash storage class
-                modes:
-                  edit:
-                    disabled: true
-                  restore:
-                    disabled: true
-              path: spec.components.tiflash.storage.storageClass
-              uiType: select
             tikvConfig:
               fieldParams:
                 label: TiKV configuration (TOML)
@@ -168,27 +144,12 @@ spec:
                 multiline: true
               path: spec.components.tikv.parameters.config
               uiType: text
-            tikvStorageClass:
-              dataSource:
-                provider: storageClasses
-              fieldParams:
-                label: TiKV storage class
-                modes:
-                  edit:
-                    disabled: true
-                  restore:
-                    disabled: true
-              path: spec.components.tikv.storage.storageClass
-              uiType: select
           componentsOrder:
-            - tikvStorageClass
-            - pdStorageClass
-            - tiflashStorageClass
             - tidbConfig
             - tikvConfig
             - pdConfig
             - tiflashConfig
-          description: Storage classes and per-component configuration overrides.
+          description: Per-component configuration overrides.
           label: Advanced configuration
         databaseVersion:
           components:
@@ -270,9 +231,22 @@ spec:
                         required: true
                   groupType: line
                   uiType: group
+                storageClass:
+                  dataSource:
+                    provider: storageClasses
+                  fieldParams:
+                    label: Storage class
+                    modes:
+                      edit:
+                        disabled: true
+                      restore:
+                        disabled: true
+                  path: spec.components.pd.storage.storageClass
+                  uiType: select
               componentsOrder:
                 - replicas
                 - resources
+                - storageClass
               uiType: group
           description: Metadata, timestamp and scheduling nodes. Use an odd number for quorum.
           label: Placement Driver (PD)
@@ -374,9 +348,22 @@ spec:
                         required: true
                   groupType: line
                   uiType: group
+                storageClass:
+                  dataSource:
+                    provider: storageClasses
+                  fieldParams:
+                    label: Storage class
+                    modes:
+                      edit:
+                        disabled: true
+                      restore:
+                        disabled: true
+                  path: spec.components.tiflash.storage.storageClass
+                  uiType: select
               componentsOrder:
                 - replicas
                 - resources
+                - storageClass
               uiType: group
           description: Optional columnar replicas that serve analytical queries on live data.
           label: Analytics (TiFlash)
@@ -437,9 +424,22 @@ spec:
                         required: true
                   groupType: line
                   uiType: group
+                storageClass:
+                  dataSource:
+                    provider: storageClasses
+                  fieldParams:
+                    label: Storage class
+                    modes:
+                      edit:
+                        disabled: true
+                      restore:
+                        disabled: true
+                  path: spec.components.tikv.storage.storageClass
+                  uiType: select
               componentsOrder:
                 - replicas
                 - resources
+                - storageClass
               uiType: group
           description: Distributed key-value storage nodes.
           label: Storage Layer (TiKV)
