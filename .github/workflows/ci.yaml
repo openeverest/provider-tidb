@@ -113,6 +113,15 @@ jobs:
       suite: backup
     secrets: inherit
 
+  test-integration-schedule:
+    name: Integration / schedule
+    needs: [lint, build, verify]
+    uses: ./.github/workflows/integration-test.yaml
+    with:
+      make_target: test-integration-schedule
+      suite: schedule
+    secrets: inherit
+
   test-integration-restore:
     name: Integration / restore
     needs: [lint, build, verify]

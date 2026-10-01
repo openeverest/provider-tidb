@@ -1,0 +1,52 @@
+# S3 credentials, an S3 BackupStorage, and an Instance with an every-minute
+# backup schedule that keeps a single successful backup.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backup-storage-credentials
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: test-access-key
+  AWS_SECRET_ACCESS_KEY: test-secret-key
+---
+apiVersion: backup.openeverest.io/v1alpha1
+kind: BackupStorage
+metadata:
+  name: s3-store
+spec:
+  type: s3
+  s3:
+    bucket: test-bucket
+    region: us-east-1
+    endpointURL: http://minio.storage:9000
+    forcePathStyle: true
+    verifyTLS: false
+    credentialsSecretRef:
+      name: backup-storage-credentials
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: sched
+spec:
+  providerRef:
+    name: tidb
+  version: "8.5.2"
+  topology:
+    type: cluster
+  components:
+    pd: {type: pd, replicas: 1, storage: {size: 10Gi}}
+    tikv: {type: tikv, replicas: 1, storage: {size: 20Gi}}
+    tidb: {type: tidb, replicas: 1}
+  backup:
+    enabled: true
+    classRef: {name: br}
+    storages:
+      - storageRef: {name: s3-store}
+        schedules:
+          - name: every-minute
+            enabled: true
+            cron: "* * * * *"
+            retention:
+              type: count
+              count: 1

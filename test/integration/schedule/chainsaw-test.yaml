@@ -1,0 +1,88 @@
+# Scheduled backups: the provider creates a Backup for every cron slot of an
+# Instance's backup schedule and deletes the ones past the schedule's retention.
+#
+# The TiDB operator is not deployed; group readiness and BR completion are
+# simulated by patching status.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: schedule
+spec:
+  description: |
+    Every-minute backup schedule with count retention 1.
+
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get instances.core.openeverest.io,backups.backup.openeverest.io -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get backups.br.pingcap.com -o yaml
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/name=provider-tidb
+        tail: 100
+
+  steps:
+    - name: provider-deployed
+      try:
+        - assert:
+            file: 00-assert.yaml
+
+    - name: setup
+      try:
+        - apply:
+            file: 10-setup.yaml
+        - script:
+            content: |
+              set -e
+              for g in pdgroup tikvgroup tidbgroup; do
+                until kubectl -n $NAMESPACE get $g/sched >/dev/null 2>&1; do sleep 1; done
+                kubectl -n $NAMESPACE patch $g/sched --subresource status --type merge \
+                  -p '{"status":{"version":"v8.5.2","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=sched"}}'
+              done
+        - assert:
+            file: 10-assert.yaml
+
+    - name: schedule-creates-backup
+      try:
+        - assert:
+            timeout: 2m
+            file: 20-assert.yaml
+
+    - name: retention-expires-older-backup
+      try:
+        # The next slot is held until the first run finishes; once the second
+        # run succeeds, count retention 1 deletes the first.
+        - script:
+            timeout: 5m
+            content: |
+              set -eu
+              scheduled() {
+                kubectl -n $NAMESPACE get backups.backup.openeverest.io --sort-by=.metadata.creationTimestamp \
+                  -o jsonpath='{range .items[?(@.spec.scheduleName=="every-minute")]}{.metadata.name}{"\n"}{end}'
+              }
+              complete() {
+                until kubectl -n $NAMESPACE get backups.br.pingcap.com/$1 >/dev/null 2>&1; do sleep 2; done
+                kubectl -n $NAMESPACE patch backups.br.pingcap.com/$1 --subresource status --type merge \
+                  -p '{"status":{"phase":"Complete"}}'
+                kubectl -n $NAMESPACE wait backups.backup.openeverest.io/$1 --for=jsonpath='{.status.state}'=Succeeded --timeout=60s
+              }
+              first=$(scheduled | head -n1)
+              complete "$first"
+              second=""
+              for _ in $(seq 90); do
+                second=$(scheduled | grep -vx "$first" | head -n1 || true)
+                [ -n "$second" ] && break
+                sleep 2
+              done
+              [ -n "$second" ] || { echo "no scheduled backup after $first"; exit 1; }
+              complete "$second"
+              kubectl -n $NAMESPACE wait backups.backup.openeverest.io/$first --for=delete --timeout=60s
+
+    - name: invalid-cron-reported
+      try:
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch instances.core.openeverest.io/sched --type json \
+                -p '[{"op":"replace","path":"/spec/backup/storages/0/schedules/0/cron","value":"not a cron"}]'
+        - assert:
+            file: 40-assert.yaml

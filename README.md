@@ -82,7 +82,7 @@ Stateful components (PD, TiKV, TiFlash) additionally report:
 | Persistent storage | ✅ | Per-component size and storage class |
 | Storage expansion | ✅ | Grow `storage.size`; shrinking is rejected. Needs an expandable StorageClass (see below) |
 | Backups (on demand) | ✅ | Full snapshot to S3-compatible storage (BR) |
-| Backups (scheduled) | ❌ | Planned |
+| Backups (scheduled) | ✅ | Cron schedules per storage with count or time retention (see below) |
 | Point-in-time recovery | ❌ | Planned |
 | Restore | ✅ | Into an existing Instance, or seed a new one via `spec.dataSource` |
 
@@ -105,6 +105,16 @@ See [ROADMAP.md](ROADMAP.md) for the planned work.
 > PD also refuses to remove a store if fewer stores than its `max-replicas` (3 by default) would be
 > left, so a cluster with fewer TiKV nodes than that can't turn TiFlash off.
 > The Instance reports `Updating` with `tiflash (removing)` until the nodes are gone.
+
+> [!NOTE]
+> TiDB Operator v2 has no controller for `BackupSchedule`, so the provider runs
+> `spec.backup.storages[].schedules` itself: each cron slot creates a `Backup` (with
+> `spec.scheduleName`) that runs like an on-demand one. A slot fires only while the Instance is
+> `Ready` or `Updating` and no earlier run of the same schedule is in progress, and is skipped if
+> it can't start within 10 minutes. Retention is anchored on successful backups: `count: N` keeps
+> the N newest successful backups, and `time` keeps everything inside the window plus the newest
+> successful backup. Pruned backups follow their own `deletionPolicy`. An invalid cron expression
+> sets the `BackupConfigured` condition to `False` with reason `BackupScheduleInvalid`.
 
 ## Installation
 
