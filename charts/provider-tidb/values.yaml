@@ -154,7 +154,8 @@ crds:
 # Each preset must have 'name', 'enabled', and 'spec' fields; 'spec' is the full
 # InstancePresetSpec and is copied verbatim into the new Instance. Rendered as
 # InstancePreset '<shortName>-<name>'. No preset pins a version, so Instances
-# get the provider's default version bundle.
+# get the provider's default version bundle. CPU stays in whole cores: the API
+# serves fractions as millicores ("500m"), which the UI's numeric field can't read.
 presets:
   # Smallest working cluster, for a laptop or a CI job. One node per component,
   # with PD told to keep a single copy of the data so it doesn't wait for
@@ -171,7 +172,7 @@ presets:
           type: pd
           replicas: 1
           resources:
-            limits: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "1", memory: 1Gi}
           storage:
             size: 2Gi
           parameters:
@@ -189,7 +190,7 @@ presets:
           type: tidb
           replicas: 1
           resources:
-            limits: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "1", memory: 1Gi}
   # Highly available transactional cluster: three PD and TiKV nodes so the
   # cluster survives losing one, and two SQL nodes behind the TiDB service.
   - name: standard
