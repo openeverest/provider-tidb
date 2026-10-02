@@ -22,14 +22,15 @@ the native custom resources of an upstream Kubernetes operator. This repository 
 for TiDB: it owns the technology-specific knowledge — components, topologies, versions and
 parameters — so that users, the API server, and the UI stay technology-agnostic.
 
-A TiDB cluster is composed of three mandatory components, each reconciled into its own
-TiDB Operator v2 resource:
+A TiDB cluster is composed of three mandatory components plus optional TiFlash, each reconciled
+into its own TiDB Operator v2 resource:
 
 | Component | Role | Operator resource |
 |---|---|---|
 | `pd` | Placement Driver — metadata, timestamps (TSO), scheduling | `PDGroup` |
 | `tikv` | Distributed key-value storage engine | `TiKVGroup` |
 | `tidb` | Stateless SQL layer (MySQL protocol) | `TiDBGroup` |
+| `tiflash` *(optional)* | Columnar replicas for analytical queries (HTAP) | `TiFlashGroup` |
 
 > [!IMPORTANT]
 > **This provider is not standalone.** It requires an OpenEverest installation (core CRDs and
@@ -66,7 +67,7 @@ is covered under [Installation](#installation).
 
 | Capability | Status | Notes |
 |---|---|---|
-| Provisioning | ✅ | PD + TiKV + TiDB |
+| Provisioning | ✅ | PD + TiKV + TiDB, optionally TiFlash |
 | Horizontal scaling | ✅ | Per-component `replicas` |
 | Vertical scaling (CPU / memory) | ✅ | Per-component `resources` |
 | Custom configuration | ✅ | Inline TOML `config` per component |
@@ -74,7 +75,7 @@ is covered under [Installation](#installation).
 | Monitoring | ❌ | Planned |
 | TLS | ❌ | Planned |
 
-Stateful components (PD, TiKV) additionally report:
+Stateful components (PD, TiKV, TiFlash) additionally report:
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -88,11 +89,22 @@ Stateful components (PD, TiKV) additionally report:
 See [ROADMAP.md](ROADMAP.md) for the planned work.
 
 > [!IMPORTANT]
-> Growing `spec.components.{pd,tikv}.storage.size` resizes the existing PVCs in place, which only
+> Growing `spec.components.{pd,tikv,tiflash}.storage.size` resizes the existing PVCs in place, which only
 > works if their StorageClass sets `allowVolumeExpansion: true`
 > (`kubectl get storageclass <name> -o jsonpath='{.allowVolumeExpansion}'`). On a StorageClass
 > without it — e.g. the k3s/kind `local-path` default — the TiDB Operator leaves the volumes at their
 > old size. Volumes can never be shrunk; `Validate` rejects a smaller size.
+
+> [!IMPORTANT]
+> **TiFlash** runs while `spec.components.tiflash` is present with a replica count other than `0`
+> (the UI defaults to `0`). Tables are only copied to TiFlash once you ask for it, e.g.
+> `ALTER TABLE t SET TIFLASH REPLICA 1`. Setting the replica count to `0` (or removing the
+> component) deletes the TiFlash nodes after the operator takes their stores offline. A store
+> can't go offline while tables still need more TiFlash replicas than the nodes left, so run
+> `ALTER TABLE ... SET TIFLASH REPLICA 0` on those tables before scaling TiFlash in or turning it off.
+> PD also refuses to remove a store if fewer stores than its `max-replicas` (3 by default) would be
+> left, so a cluster with fewer TiKV nodes than that can't turn TiFlash off.
+> The Instance reports `Updating` with `tiflash (removing)` until the nodes are gone.
 
 ## Installation
 
@@ -202,21 +214,39 @@ mysql -h my-tidb-tidb.<namespace> -P 4000 -u root -p"$(kubectl get secret my-tid
 > yields two `TiDB` resources (`kubectl get tidb`) and two pods, all belonging to one `TiDBGroup`
 > (`kubectl get tidbgroup`). This mirrors how a Deployment owns its Pods.
 
+### Presets
+
+The chart ships `InstancePreset`s, so the UI can create a working cluster in one click:
+
+| Preset | PD | TiKV | TiDB | TiFlash | Use it for |
+|---|---|---|---|---|---|
+| `tidb-dev` | 1 | 1 | 1 | — | A laptop or CI: the smallest cluster that runs (about 4 GiB) |
+| `tidb-standard` | 3 | 3 | 2 | — | A highly available transactional database |
+| `tidb-analytics` | 3 | 3 | 2 | 2 | Transactions plus analytics on the same data |
+
+`tidb-dev` has no redundancy and sets PD's `max-replicas` to `1`, so PD stops trying to place
+three copies of the data on its single TiKV node. To try TiFlash on it, add a `tiflash`
+component with at least 4 GiB of memory; TiFlash is killed for running out of memory at 3 GiB.
+Presets pin the default version bundle; a unit test fails if they fall behind it. Sizes and the
+list itself
+live under `presets:` in [values.yaml](charts/provider-tidb/values.yaml); set `enabled: false`
+to hide one.
+
 ## Topologies
 
 | Topology | Default | Description |
 |---|---|---|
-| `cluster` | ✅ | Standard distributed TiDB: PD + TiKV + TiDB |
+| `cluster` | ✅ | Standard distributed TiDB: PD + TiKV + TiDB, optionally TiFlash |
 
 ## Versions
 
 | Version bundle | Default | Components |
 |---|---|---|
-| `8.5.2` | ✅ | PD / TiKV / TiDB `v8.5.2` |
-| `7.5.5` |  | PD / TiKV / TiDB `v7.5.5` |
+| `8.5.2` | ✅ | PD / TiKV / TiDB / TiFlash `v8.5.2` |
+| `7.5.5` |  | PD / TiKV / TiDB / TiFlash `v7.5.5` |
 
-Source of truth: [definition/versions.yaml](definition/versions.yaml). Each bundle pins PD, TiKV
-and TiDB to the same TiDB release; the user selects one via `Instance.spec.version`.
+Source of truth: [definition/versions.yaml](definition/versions.yaml). Each bundle pins every
+component to the same TiDB release; the user selects one via `Instance.spec.version`.
 
 ## Configuration
 

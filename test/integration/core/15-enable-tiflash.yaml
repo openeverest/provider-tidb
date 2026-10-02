@@ -1,0 +1,12 @@
+# Enabling TiFlash on a running Instance adds the optional component.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  components:
+    tiflash:
+      type: tiflash
+      replicas: 1
+      storage:
+        size: 15Gi

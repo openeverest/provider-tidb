@@ -15,7 +15,7 @@ import (
 
 // upgradeOrder is the order TiDB Operator rolls a version change out in; it
 // holds each component back until the ones before it run at least its version.
-var upgradeOrder = []string{common.ComponentPD, common.ComponentTiKV, common.ComponentTiDB}
+var upgradeOrder = []string{common.ComponentPD, common.ComponentTiFlash, common.ComponentTiKV, common.ComponentTiDB}
 
 // validateVersions enforces TiDB's upgrade rules on the requested component
 // versions, comparing them with what the cluster already targets.
@@ -34,13 +34,18 @@ func validateVersions(c *controller.Context) error {
 	return checkNoDowngrade(current, target)
 }
 
-// targetVersions resolves each component's requested version: an explicit
-// component version wins, otherwise the Instance's version bundle supplies it.
+// targetVersions resolves each running component's requested version: an
+// explicit component version wins, otherwise the Instance's version bundle
+// supplies it. A disabled TiFlash has no target.
 func targetVersions(c *controller.Context) (map[string]string, error) {
 	comps := c.Instance().Spec.Components
 	target := make(map[string]string, len(upgradeOrder))
 	var bundleVersions map[string]string
+	_, tiflashEnabled := enabledTiFlash(comps)
 	for _, name := range upgradeOrder {
+		if name == common.ComponentTiFlash && !tiflashEnabled {
+			continue
+		}
 		version := comps[name].Version
 		if version == "" {
 			if bundleVersions == nil {
@@ -98,6 +103,13 @@ func currentVersions(c *controller.Context) (map[string]string, error) {
 		return nil, fmt.Errorf("reading current tidb version: %w", err)
 	} else if found {
 		current[common.ComponentTiDB] = tidb.Spec.Template.Spec.Version
+	}
+
+	tiflash := &tidbcorev1.TiFlashGroup{}
+	if found, err := c.Exists(tiflash, c.Name()); err != nil {
+		return nil, fmt.Errorf("reading current tiflash version: %w", err)
+	} else if found {
+		current[common.ComponentTiFlash] = tiflash.Spec.Template.Spec.Version
 	}
 
 	return current, nil

@@ -16,6 +16,13 @@ spec:
           version: v8.5.2
         - image: pingcap/tidb:v7.5.5
           version: v7.5.5
+    tiflash:
+      defaultVersion: v8.5.2
+      versions:
+        - image: pingcap/tiflash:v8.5.2
+          version: v8.5.2
+        - image: pingcap/tiflash:v7.5.5
+          version: v7.5.5
     tikv:
       defaultVersion: v8.5.2
       versions:
@@ -40,6 +47,14 @@ spec:
               type: string
           type: object
       type: tidb
+    tiflash:
+      parametersSchema:
+        openAPIV3Schema:
+          properties:
+            config:
+              type: string
+          type: object
+      type: tiflash
     tikv:
       parametersSchema:
         openAPIV3Schema:
@@ -71,6 +86,17 @@ spec:
                 replicas:
                   minimum: 1
                 resources: {}
+        tiflash:
+          optional: true
+          supportedFields:
+            openAPIV3Schema:
+              properties:
+                replicas:
+                  minimum: 0
+                resources: {}
+                storage: {}
+              required:
+                - storage
         tikv:
           supportedFields:
             openAPIV3Schema:
@@ -94,18 +120,6 @@ spec:
                 multiline: true
               path: spec.components.pd.parameters.config
               uiType: text
-            pdStorageClass:
-              dataSource:
-                provider: storageClasses
-              fieldParams:
-                label: PD storage class
-                modes:
-                  edit:
-                    disabled: true
-                  restore:
-                    disabled: true
-              path: spec.components.pd.storage.storageClass
-              uiType: select
             tidbConfig:
               fieldParams:
                 label: TiDB configuration (TOML)
@@ -113,6 +127,14 @@ spec:
                 minRows: 3
                 multiline: true
               path: spec.components.tidb.parameters.config
+              uiType: text
+            tiflashConfig:
+              fieldParams:
+                label: TiFlash configuration (TOML)
+                maxRows: 8
+                minRows: 3
+                multiline: true
+              path: spec.components.tiflash.parameters.config
               uiType: text
             tikvConfig:
               fieldParams:
@@ -122,25 +144,12 @@ spec:
                 multiline: true
               path: spec.components.tikv.parameters.config
               uiType: text
-            tikvStorageClass:
-              dataSource:
-                provider: storageClasses
-              fieldParams:
-                label: TiKV storage class
-                modes:
-                  edit:
-                    disabled: true
-                  restore:
-                    disabled: true
-              path: spec.components.tikv.storage.storageClass
-              uiType: select
           componentsOrder:
-            - tikvStorageClass
-            - pdStorageClass
             - tidbConfig
             - tikvConfig
             - pdConfig
-          description: Storage classes and per-component configuration overrides.
+            - tiflashConfig
+          description: Per-component configuration overrides.
           label: Advanced configuration
         databaseVersion:
           components:
@@ -222,9 +231,22 @@ spec:
                         required: true
                   groupType: line
                   uiType: group
+                storageClass:
+                  dataSource:
+                    provider: storageClasses
+                  fieldParams:
+                    label: Storage class
+                    modes:
+                      edit:
+                        disabled: true
+                      restore:
+                        disabled: true
+                  path: spec.components.pd.storage.storageClass
+                  uiType: select
               componentsOrder:
                 - replicas
                 - resources
+                - storageClass
               uiType: group
           description: Metadata, timestamp and scheduling nodes. Use an odd number for quorum.
           label: Placement Driver (PD)
@@ -274,6 +296,77 @@ spec:
               uiType: group
           description: Stateless SQL nodes that speak the MySQL protocol.
           label: SQL Layer (TiDB)
+        tiflash:
+          components:
+            tiflashGroup:
+              components:
+                replicas:
+                  fieldParams:
+                    defaultValue: 0
+                    helperText: 0 runs the cluster without TiFlash
+                    label: Number of TiFlash nodes
+                  path: spec.components.tiflash.replicas
+                  uiType: number
+                  validation:
+                    int: true
+                    min: 0
+                resources:
+                  components:
+                    cpu:
+                      fieldParams:
+                        defaultValue: 2
+                        label: CPU
+                        step: 1
+                      path: spec.components.tiflash.resources.limits.cpu
+                      uiType: number
+                      validation:
+                        min: 0.5
+                        required: true
+                    disk:
+                      fieldParams:
+                        badge: Gi
+                        badgeToApi: true
+                        defaultValue: 25
+                        label: Disk
+                      path: spec.components.tiflash.storage.size
+                      uiType: number
+                      validation:
+                        int: true
+                        min: 1
+                        required: true
+                    memory:
+                      fieldParams:
+                        badge: Gi
+                        badgeToApi: true
+                        defaultValue: 4
+                        label: Memory
+                        step: 0.1
+                      path: spec.components.tiflash.resources.limits.memory
+                      uiType: number
+                      validation:
+                        min: 0.5
+                        required: true
+                  groupType: line
+                  uiType: group
+                storageClass:
+                  dataSource:
+                    provider: storageClasses
+                  fieldParams:
+                    label: Storage class
+                    modes:
+                      edit:
+                        disabled: true
+                      restore:
+                        disabled: true
+                  path: spec.components.tiflash.storage.storageClass
+                  uiType: select
+              componentsOrder:
+                - replicas
+                - resources
+                - storageClass
+              uiType: group
+          description: Optional columnar replicas that serve analytical queries on live data.
+          label: Analytics (TiFlash)
         tikv:
           components:
             tikvGroup:
@@ -331,9 +424,22 @@ spec:
                         required: true
                   groupType: line
                   uiType: group
+                storageClass:
+                  dataSource:
+                    provider: storageClasses
+                  fieldParams:
+                    label: Storage class
+                    modes:
+                      edit:
+                        disabled: true
+                      restore:
+                        disabled: true
+                  path: spec.components.tikv.storage.storageClass
+                  uiType: select
               componentsOrder:
                 - replicas
                 - resources
+                - storageClass
               uiType: group
           description: Distributed key-value storage nodes.
           label: Storage Layer (TiKV)
@@ -341,16 +447,19 @@ spec:
         - databaseVersion
         - tidb
         - tikv
+        - tiflash
         - pd
         - advanced
   versions:
     - components:
         pd: v8.5.2
         tidb: v8.5.2
+        tiflash: v8.5.2
         tikv: v8.5.2
       name: 8.5.2
     - components:
         pd: v7.5.5
         tidb: v7.5.5
+        tiflash: v7.5.5
         tikv: v7.5.5
       name: 7.5.5

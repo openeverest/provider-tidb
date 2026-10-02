@@ -13,6 +13,8 @@ const (
 	ComponentPD   = "pd"
 	ComponentTiKV = "tikv"
 	ComponentTiDB = "tidb"
+	// ComponentTiFlash is optional: present with a non-zero replica count means enabled.
+	ComponentTiFlash = "tiflash"
 
 	// TopologyCluster is the standard distributed TiDB topology.
 	TopologyCluster = "cluster"

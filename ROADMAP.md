@@ -35,7 +35,7 @@ source of truth for scope; update it as milestones land.
 | component `pd` | `PDGroup` (+ `data` volume, required) |
 | component `tikv` | `TiKVGroup` (+ `data` volume, required) |
 | component `tidb` | `TiDBGroup` (stateless, no volume) |
-| component `tiflash` *(later)* | `TiFlashGroup` (+ `data` volume) |
+| component `tiflash` *(optional)* | `TiFlashGroup` (+ `data` volume) |
 | component `ticdc` *(later)* | `TiCDCGroup` |
 | component `tiproxy` *(later)* | `TiProxyGroup` (own version line) |
 | `component.replicas` | `*Group.spec.replicas` |
@@ -133,7 +133,8 @@ Ordered by value/effort; each phase is independently shippable.
   `InstanceBackupStatusReporter`.
 
 ### Phase 3 — HTAP & connectivity components
-- **TiFlash** component (`TiFlashGroup`) — columnar/HTAP, optional in the topology.
+- **TiFlash** component (`TiFlashGroup`) — columnar/HTAP, optional in the topology (done: enabled
+  while it has a replica count other than `0`).
 - **TiProxy** component (`TiProxyGroup`) — connection proxy / session migration (own version line).
 - **TiCDC** component (`TiCDCGroup`) — change-data-capture.
 - **External access:** map `component.service` → v2 `server`/expose for LoadBalancer/NodePort.

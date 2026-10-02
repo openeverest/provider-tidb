@@ -12,4 +12,7 @@ components:
     tikv:
         type: tikv
         parametersSchema: TikvParameters
+    tiflash:
+        type: tiflash
+        parametersSchema: TiflashParameters
 name: tidb

@@ -20,9 +20,10 @@ import (
 
 // Fallbacks used when an Instance omits a value the UI normally supplies.
 const (
-	defaultPDReplicas   int32 = 3
-	defaultTiKVReplicas int32 = 3
-	defaultTiDBReplicas int32 = 2
+	defaultPDReplicas      int32 = 3
+	defaultTiKVReplicas    int32 = 3
+	defaultTiDBReplicas    int32 = 2
+	defaultTiFlashReplicas int32 = 1
 )
 
 var defaultVolumeSize = resource.MustParse("10Gi")
@@ -83,7 +84,38 @@ func SyncTiDB(c *controller.Context) error {
 		return err
 	}
 
+	if err := syncTiFlash(c, providerSpec, owner); err != nil {
+		return err
+	}
+
 	return reconcileDataSource(c)
+}
+
+// syncTiFlash applies the TiFlash group while TiFlash is enabled and deletes it
+// once disabled; the operator offlines each TiFlash store before removing it.
+func syncTiFlash(c *controller.Context, providerSpec *corev1alpha1.ProviderSpec, owner *tidbcorev1.Cluster) error {
+	if tiflash, ok := enabledTiFlash(c.Instance().Spec.Components); ok {
+		return applyWithOwner(c, owner, buildTiFlashGroup(c, tiflash, resolveImage(providerSpec, common.ComponentTiFlash, tiflash)))
+	}
+	group := &tidbcorev1.TiFlashGroup{}
+	found, err := c.Exists(group, c.Name())
+	if err != nil {
+		return fmt.Errorf("get tiflash group: %w", err)
+	}
+	if !found || !group.DeletionTimestamp.IsZero() {
+		return nil
+	}
+	return c.Delete(group)
+}
+
+// enabledTiFlash returns the TiFlash component when the Instance runs it: the
+// component is present and does not ask for zero replicas.
+func enabledTiFlash(comps map[string]corev1alpha1.ComponentSpec) (corev1alpha1.ComponentSpec, bool) {
+	comp, ok := comps[common.ComponentTiFlash]
+	if !ok || (comp.Replicas != nil && *comp.Replicas == 0) {
+		return corev1alpha1.ComponentSpec{}, false
+	}
+	return comp, true
 }
 
 // applyWithOwner creates or updates obj with the given controller owner,
@@ -239,6 +271,28 @@ func buildTiDBGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, imag
 			Cluster:  clusterRef(c),
 			Replicas: replicasOrDefault(comp.Replicas, defaultTiDBReplicas),
 			Template: tidbcorev1.TiDBTemplate{Spec: tmpl},
+		},
+	}
+}
+
+func buildTiFlashGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, image string) *tidbcorev1.TiFlashGroup {
+	tmpl := tidbcorev1.TiFlashTemplateSpec{
+		Version:   comp.Version,
+		Resources: toResources(comp.Resources),
+		Volumes:   []tidbcorev1.Volume{dataVolume(comp.Storage, tidbcorev1.VolumeMountTypeTiFlashData)},
+	}
+	if image != "" {
+		tmpl.Image = &image
+	}
+	if cfg := componentConfig(c, comp); cfg != "" {
+		tmpl.Config = tidbcorev1.ConfigFile(cfg)
+	}
+	return &tidbcorev1.TiFlashGroup{
+		ObjectMeta: c.ObjectMeta(c.Name()),
+		Spec: tidbcorev1.TiFlashGroupSpec{
+			Cluster:  clusterRef(c),
+			Replicas: replicasOrDefault(comp.Replicas, defaultTiFlashReplicas),
+			Template: tidbcorev1.TiFlashTemplate{Spec: tmpl},
 		},
 	}
 }
