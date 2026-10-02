@@ -49,10 +49,14 @@ func StatusTiDB(c *controller.Context) (controller.Status, error) {
 	if err != nil {
 		return controller.Status{}, fmt.Errorf("get tiflash group: %w", err)
 	}
-	_, tiflashEnabled := enabledTiFlash(c.Instance().Spec.Components)
+	tiflashSpec, tiflashEnabled := enabledTiFlash(c.Instance().Spec.Components)
 	switch {
 	case tiflashEnabled && !found:
-		return controller.Provisioning("Waiting for TiFlash group to be created"), nil
+		// Not an early Provisioning return: the cache may not show the group just
+		// applied, and Provisioning would stick on an Instance that was Ready.
+		groups = append(groups, groupRollout{
+			component: common.ComponentTiFlash, replicas: replicasOrDefault(tiflashSpec.Replicas, defaultTiFlashReplicas),
+		})
 	case found:
 		groups = append(groups, groupRollout{
 			component: common.ComponentTiFlash, replicas: tiflash.Spec.Replicas, version: tiflash.Spec.Template.Spec.Version,

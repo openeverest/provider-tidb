@@ -70,16 +70,19 @@ func TestStatusTiDBTiFlash(t *testing.T) {
 	}
 	tests := []struct {
 		name        string
+		previous    corev1alpha1.InstancePhase
 		replicas    int32
 		group       client.Object
 		wantPhase   corev1alpha1.InstancePhase
 		wantMessage string
 	}{
-		{"enabled before the group exists", 1, nil, corev1alpha1.InstancePhaseProvisioning, "Waiting for TiFlash group to be created"},
-		{"enabled and starting", 1, tiflashGroup(0), corev1alpha1.InstancePhaseProvisioning, "tiflash (0/1 ready)"},
-		{"enabled and ready", 1, tiflashGroup(1), corev1alpha1.InstancePhaseReady, ""},
-		{"disabled and still running", 0, tiflashGroup(1), corev1alpha1.InstancePhaseProvisioning, "tiflash (removing)"},
-		{"disabled and gone", 0, nil, corev1alpha1.InstancePhaseReady, ""},
+		{"enabled before the group exists", "", 1, nil, corev1alpha1.InstancePhaseProvisioning, "tiflash (0/1 ready)"},
+		{"enabled on a ready instance before the group exists", corev1alpha1.InstancePhaseReady, 1, nil, corev1alpha1.InstancePhaseUpdating, "tiflash (0/1 ready)"},
+		{"enabled and starting", "", 1, tiflashGroup(0), corev1alpha1.InstancePhaseProvisioning, "tiflash (0/1 ready)"},
+		{"enabled on a ready instance and starting", corev1alpha1.InstancePhaseReady, 1, tiflashGroup(0), corev1alpha1.InstancePhaseUpdating, "tiflash (0/1 ready)"},
+		{"enabled and ready", "", 1, tiflashGroup(1), corev1alpha1.InstancePhaseReady, ""},
+		{"disabled and still running", "", 0, tiflashGroup(1), corev1alpha1.InstancePhaseProvisioning, "tiflash (removing)"},
+		{"disabled and gone", "", 0, nil, corev1alpha1.InstancePhaseReady, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,7 +90,9 @@ func TestStatusTiDBTiFlash(t *testing.T) {
 			if tt.group != nil {
 				objs = append(objs, tt.group)
 			}
-			c := validationContext(t, withTiFlash(testInstance("8.5.2"), tt.replicas, ""), objs...)
+			in := withTiFlash(testInstance("8.5.2"), tt.replicas, "")
+			in.Status.Phase = tt.previous
+			c := validationContext(t, in, objs...)
 
 			got, err := StatusTiDB(c)
 			assertError(t, err, "")
