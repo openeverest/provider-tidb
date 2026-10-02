@@ -1,0 +1,9 @@
+# An unparsable cron expression is reported on the Instance without failing it.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: sched
+status:
+  (conditions[?type == 'BackupConfigured']):
+    - status: "False"
+      reason: BackupScheduleInvalid

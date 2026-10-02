@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/openeverest/openeverest/v2 v2.0.0-dev.2.0.20260929143831-d9af5619c316
+	github.com/robfig/cron/v3 v3.0.1
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
 	sigs.k8s.io/controller-runtime v0.25.1
