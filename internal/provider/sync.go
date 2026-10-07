@@ -328,6 +328,7 @@ func buildPDGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, image 
 		Version:   comp.Version,
 		Resources: toResources(comp.Resources),
 		Volumes:   []tidbcorev1.Volume{dataVolume(comp.Storage, tidbcorev1.VolumeMountTypePDData)},
+		Overlay:   podLabelsOverlay(c, common.ComponentPD),
 	}
 	if image != "" {
 		tmpl.Image = &image
@@ -350,6 +351,7 @@ func buildTiKVGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, imag
 		Version:   comp.Version,
 		Resources: toResources(comp.Resources),
 		Volumes:   []tidbcorev1.Volume{dataVolume(comp.Storage, tidbcorev1.VolumeMountTypeTiKVData)},
+		Overlay:   podLabelsOverlay(c, common.ComponentTiKV),
 	}
 	if image != "" {
 		tmpl.Image = &image
@@ -372,6 +374,7 @@ func buildTiDBGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, imag
 	tmpl := tidbcorev1.TiDBTemplateSpec{
 		Version:   comp.Version,
 		Resources: toResources(comp.Resources),
+		Overlay:   podLabelsOverlay(c, common.ComponentTiDB),
 	}
 	if image != "" {
 		tmpl.Image = &image
@@ -394,6 +397,7 @@ func buildTiFlashGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, i
 		Version:   comp.Version,
 		Resources: toResources(comp.Resources),
 		Volumes:   []tidbcorev1.Volume{dataVolume(comp.Storage, tidbcorev1.VolumeMountTypeTiFlashData)},
+		Overlay:   podLabelsOverlay(c, common.ComponentTiFlash),
 	}
 	if image != "" {
 		tmpl.Image = &image
@@ -407,6 +411,17 @@ func buildTiFlashGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, i
 			Cluster:  clusterRef(c),
 			Replicas: replicasOrDefault(comp.Replicas, defaultTiFlashReplicas),
 			Template: tidbcorev1.TiFlashTemplate{Spec: tmpl},
+		},
+	}
+}
+
+// podLabelsOverlay labels a component's pods so the runtime counts them into
+// the Instance's status.components. The operator copies only its own labels
+// from the group template to the pods, so they go through the pod overlay.
+func podLabelsOverlay(c *controller.Context, component string) *tidbcorev1.Overlay {
+	return &tidbcorev1.Overlay{
+		Pod: &tidbcorev1.PodOverlay{
+			ObjectMeta: tidbcorev1.ObjectMeta{Labels: c.PodLabels(component)},
 		},
 	}
 }

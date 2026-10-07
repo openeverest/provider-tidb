@@ -141,31 +141,13 @@ func (g groupRollout) summary() string {
 	return fmt.Sprintf("%s (%s: %s)", g.component, counts, reason)
 }
 
-func (g groupRollout) componentStatus() controller.ComponentStatus {
-	state := "Ready"
-	switch {
-	case g.problem.fatal:
-		state = "Error"
-	case !g.converged():
-		state = "InProgress"
-	}
-	return controller.ComponentStatus{
-		Name:  g.component,
-		Ready: g.groupStatus.ReadyReplicas,
-		Total: g.desired(),
-		State: state,
-	}
-}
-
 // evaluateStatus picks the Instance phase: Failed if a component is stuck,
 // Ready once every group converged, otherwise Provisioning on the first
 // rollout and Updating on a cluster that was already serving.
 func evaluateStatus(previous corev1alpha1.InstancePhase, groups []groupRollout) controller.Status {
-	components := make([]controller.ComponentStatus, 0, len(groups))
 	var pending []string
 	var failure string
 	for _, g := range groups {
-		components = append(components, g.componentStatus())
 		if g.problem.fatal && failure == "" {
 			failure = fmt.Sprintf("%s is failing: %s", g.component, g.problem.message)
 		}
@@ -174,20 +156,17 @@ func evaluateStatus(previous corev1alpha1.InstancePhase, groups []groupRollout) 
 		}
 	}
 
-	var status controller.Status
 	summary := strings.Join(pending, ", ")
 	switch {
 	case failure != "":
-		status = controller.Failed(failure)
+		return controller.Failed(failure)
 	case len(pending) == 0:
-		status = controller.Ready()
+		return controller.Ready()
 	case previous == corev1alpha1.InstancePhaseReady || previous == corev1alpha1.InstancePhaseUpdating:
-		status = controller.Updating("Rolling out changes to " + summary)
+		return controller.Updating("Rolling out changes to " + summary)
 	default:
-		status = controller.Provisioning("Waiting for " + summary)
+		return controller.Provisioning("Waiting for " + summary)
 	}
-	status.Components = components
-	return status
 }
 
 // instanceProblems reads the conditions the operator keeps on each PD, TiKV,
