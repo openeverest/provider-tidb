@@ -76,6 +76,7 @@ spec:
                 replicas:
                   minimum: 1
                 resources: {}
+                schedulingPolicy: {}
                 storage: {}
               required:
                 - storage
@@ -86,6 +87,7 @@ spec:
                 replicas:
                   minimum: 1
                 resources: {}
+                schedulingPolicy: {}
         tiflash:
           optional: true
           supportedFields:
@@ -94,6 +96,7 @@ spec:
                 replicas:
                   minimum: 0
                 resources: {}
+                schedulingPolicy: {}
                 storage: {}
               required:
                 - storage
@@ -104,6 +107,7 @@ spec:
                 replicas:
                   minimum: 1
                 resources: {}
+                schedulingPolicy: {}
                 storage: {}
               required:
                 - storage

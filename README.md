@@ -71,6 +71,7 @@ is covered under [Installation](#installation).
 | Horizontal scaling | ✅ | Per-component `replicas` |
 | Vertical scaling (CPU / memory) | ✅ | Per-component `resources` |
 | Custom configuration | ✅ | Inline TOML `config` per component |
+| Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
 | Version upgrades | ❌ | Planned — ordered rolling upgrade |
 | Monitoring | ❌ | Planned |
 | TLS | ❌ | Planned |

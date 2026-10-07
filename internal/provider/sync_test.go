@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	commonv1alpha1 "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
@@ -55,6 +57,43 @@ func TestApplyOwnedByClusterDropsImplicitEmptyStructs(t *testing.T) {
 	}
 	if _, ok := templateSpec["volumes"]; !ok {
 		t.Errorf("apply body lost spec.template.spec.volumes: %v", templateSpec)
+	}
+}
+
+func TestPodOverlayScheduling(t *testing.T) {
+	in := testInstance(testVersion)
+	c := controller.NewContext(context.Background(), fake.NewClientBuilder().Build(), in, common.ProviderName)
+
+	if got := podOverlay(c, common.ComponentTiKV, &commonv1alpha1.SchedulingPolicy{}); got.Pod.Spec != nil {
+		t.Errorf("empty policy: pod spec = %+v, want none so pods are not rolled", got.Pod.Spec)
+	}
+
+	ownSelector := &metav1.LabelSelector{MatchLabels: map[string]string{"app": "other"}}
+	policy := &commonv1alpha1.SchedulingPolicy{
+		NodeSelector: map[string]string{"disk": "ssd"},
+		TopologySpreadConstraints: &[]corev1.TopologySpreadConstraint{
+			{TopologyKey: corev1.LabelTopologyZone, MaxSkew: 1},
+			{TopologyKey: corev1.LabelHostname, MaxSkew: 1, LabelSelector: ownSelector},
+		},
+	}
+	got := podOverlay(c, common.ComponentTiKV, policy)
+
+	podLabels := got.Pod.Labels
+	if podLabels[controller.ComponentLabel] != common.ComponentTiKV {
+		t.Fatalf("pod labels = %v, want the tikv component labels", podLabels)
+	}
+	if got.Pod.Spec == nil || got.Pod.Spec.NodeSelector["disk"] != "ssd" {
+		t.Fatalf("pod spec = %+v, want the policy's node selector", got.Pod.Spec)
+	}
+	constraints := got.Pod.Spec.TopologySpreadConstraints
+	if len(constraints) != 2 {
+		t.Fatalf("constraints = %+v, want 2", constraints)
+	}
+	if !reflect.DeepEqual(constraints[0].LabelSelector.MatchLabels, podLabels) {
+		t.Errorf("selector-less constraint selects %v, want the component's pods %v", constraints[0].LabelSelector.MatchLabels, podLabels)
+	}
+	if !reflect.DeepEqual(constraints[1].LabelSelector, ownSelector) {
+		t.Errorf("constraint selector = %v, want the user's %v", constraints[1].LabelSelector, ownSelector)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -16,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/structured-merge-diff/v6/value"
 
+	commonv1alpha1 "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
@@ -324,7 +326,7 @@ func buildPDGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, image 
 		Version:   comp.Version,
 		Resources: toResources(comp.Resources),
 		Volumes:   []tidbcorev1.Volume{dataVolume(comp.Storage, tidbcorev1.VolumeMountTypePDData)},
-		Overlay:   podLabelsOverlay(c, common.ComponentPD),
+		Overlay:   podOverlay(c, common.ComponentPD, comp.SchedulingPolicy),
 	}
 	if image != "" {
 		tmpl.Image = &image
@@ -347,7 +349,7 @@ func buildTiKVGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, imag
 		Version:   comp.Version,
 		Resources: toResources(comp.Resources),
 		Volumes:   []tidbcorev1.Volume{dataVolume(comp.Storage, tidbcorev1.VolumeMountTypeTiKVData)},
-		Overlay:   podLabelsOverlay(c, common.ComponentTiKV),
+		Overlay:   podOverlay(c, common.ComponentTiKV, comp.SchedulingPolicy),
 	}
 	if image != "" {
 		tmpl.Image = &image
@@ -370,7 +372,7 @@ func buildTiDBGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, imag
 	tmpl := tidbcorev1.TiDBTemplateSpec{
 		Version:   comp.Version,
 		Resources: toResources(comp.Resources),
-		Overlay:   podLabelsOverlay(c, common.ComponentTiDB),
+		Overlay:   podOverlay(c, common.ComponentTiDB, comp.SchedulingPolicy),
 	}
 	if image != "" {
 		tmpl.Image = &image
@@ -393,7 +395,7 @@ func buildTiFlashGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, i
 		Version:   comp.Version,
 		Resources: toResources(comp.Resources),
 		Volumes:   []tidbcorev1.Volume{dataVolume(comp.Storage, tidbcorev1.VolumeMountTypeTiFlashData)},
-		Overlay:   podLabelsOverlay(c, common.ComponentTiFlash),
+		Overlay:   podOverlay(c, common.ComponentTiFlash, comp.SchedulingPolicy),
 	}
 	if image != "" {
 		tmpl.Image = &image
@@ -411,15 +413,29 @@ func buildTiFlashGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, i
 	}
 }
 
-// podLabelsOverlay labels a component's pods so the runtime counts them into
-// the Instance's status.components. The operator copies only its own labels
-// from the group template to the pods, so they go through the pod overlay.
-func podLabelsOverlay(c *controller.Context, component string) *tidbcorev1.Overlay {
-	return &tidbcorev1.Overlay{
-		Pod: &tidbcorev1.PodOverlay{
-			ObjectMeta: tidbcorev1.ObjectMeta{Labels: c.PodLabels(component)},
-		},
+// podOverlay labels a component's pods so the runtime counts them into the
+// Instance's status.components, and places them per the component's scheduling
+// policy. The operator copies only its own labels from the group template to
+// the pods, so both go through the pod overlay. Without a policy the pods keep
+// the operator's placement: no affinity and the scheduler's built-in spreading.
+func podOverlay(c *controller.Context, component string, policy *commonv1alpha1.SchedulingPolicy) *tidbcorev1.Overlay {
+	labels := c.PodLabels(component)
+	pod := &tidbcorev1.PodOverlay{ObjectMeta: tidbcorev1.ObjectMeta{Labels: labels}}
+	if policy == nil {
+		return &tidbcorev1.Overlay{Pod: pod}
 	}
+	spec := corev1.PodSpec{
+		SchedulerName:             policy.SchedulerName,
+		NodeSelector:              policy.NodeSelector,
+		Affinity:                  policy.Affinity,
+		Tolerations:               policy.Tolerations,
+		TopologySpreadConstraints: controller.TopologySpreadConstraints(policy, labels),
+	}
+	// An empty spec would still be applied as {} and roll the pods for nothing.
+	if !equality.Semantic.DeepEqual(spec, corev1.PodSpec{}) {
+		pod.Spec = &spec
+	}
+	return &tidbcorev1.Overlay{Pod: pod}
 }
 
 func clusterRef(c *controller.Context) tidbcorev1.ClusterReference {
