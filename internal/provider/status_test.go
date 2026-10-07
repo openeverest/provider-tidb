@@ -1,14 +1,12 @@
 package provider
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
-	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 )
@@ -87,7 +85,7 @@ func TestEvaluateStatusPhase(t *testing.T) {
 	}
 }
 
-func TestEvaluateStatusReportsComponents(t *testing.T) {
+func TestEvaluateStatusReportsPendingComponents(t *testing.T) {
 	tikv := convergedGroup("tikv", 3)
 	tikv.groupStatus.ReadyReplicas = 1
 	tikv.problem = componentProblem{message: "instance orders-abc: pod of the instance is not ready"}
@@ -104,14 +102,6 @@ func TestEvaluateStatusReportsComponents(t *testing.T) {
 	if got.Message != wantMessage {
 		t.Errorf("message = %q, want %q", got.Message, wantMessage)
 	}
-	wantComponents := []controller.ComponentStatus{
-		{Name: "pd", Ready: 3, Total: 3, State: "Ready"},
-		{Name: "tikv", Ready: 1, Total: 3, State: "InProgress"},
-		{Name: "tidb", Ready: 0, Total: 2, State: "InProgress"},
-	}
-	if !reflect.DeepEqual(got.Components, wantComponents) {
-		t.Errorf("components = %+v, want %+v", got.Components, wantComponents)
-	}
 }
 
 func TestEvaluateStatusFailsOnStuckInstance(t *testing.T) {
@@ -126,9 +116,6 @@ func TestEvaluateStatusFailsOnStuckInstance(t *testing.T) {
 	}
 	if want := "tikv is failing: instance orders-abc: main container tikv is waiting"; got.Message != want {
 		t.Errorf("message = %q, want %q", got.Message, want)
-	}
-	if got.Components[1].State != "Error" {
-		t.Errorf("tikv state = %q, want Error", got.Components[1].State)
 	}
 }
 

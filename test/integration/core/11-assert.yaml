@@ -1,8 +1,16 @@
 # Once every group reports its desired replicas ready, the provider's Status()
-# must surface phase Ready on the Instance.
+# must surface phase Ready on the Instance. The runtime reports each component's
+# pods by the labels the provider sets; pod counts and the optional TiFlash
+# entry vary between steps and suites, so only the core selectors are asserted.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
   name: test-instance
 status:
   phase: Ready
+  (components[?name == 'pd'].selector):
+    - core.openeverest.io/component=pd,core.openeverest.io/instance=test-instance
+  (components[?name == 'tikv'].selector):
+    - core.openeverest.io/component=tikv,core.openeverest.io/instance=test-instance
+  (components[?name == 'tidb'].selector):
+    - core.openeverest.io/component=tidb,core.openeverest.io/instance=test-instance

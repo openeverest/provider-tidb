@@ -55,9 +55,6 @@ func TestEvaluateStatusWhileRemovingTiFlash(t *testing.T) {
 	if got.Phase != corev1alpha1.InstancePhaseUpdating || !strings.Contains(got.Message, "tiflash (removing)") {
 		t.Fatalf("status = %s %q, want Updating while tiflash is removed", got.Phase, got.Message)
 	}
-	if c := got.Components[1]; c.Total != 0 || c.State != "InProgress" {
-		t.Errorf("tiflash component = %+v, want 0 desired and InProgress", c)
-	}
 }
 
 func TestStatusTiDBTiFlash(t *testing.T) {

@@ -30,6 +30,14 @@ rules:
   - create
   - patch
 - apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - backup.openeverest.io
   resources:
   - backupclasses
