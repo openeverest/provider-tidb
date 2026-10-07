@@ -21,10 +21,9 @@
     - create
     - patch
 - apiGroups:
-    - backup.openeverest.io
+    - ""
   resources:
-    - backupclasses
-    - backupstorages
+    - pods
   verbs:
     - get
     - list
@@ -32,12 +31,11 @@
 - apiGroups:
     - backup.openeverest.io
   resources:
-    - backups
+    - backupclasses
+    - backupstorages
   verbs:
     - get
     - list
-    - patch
-    - update
     - watch
 - apiGroups:
     - backup.openeverest.io
@@ -57,17 +55,6 @@
     - update
 - apiGroups:
     - backup.openeverest.io
-  resources:
-    - restores
-  verbs:
-    - create
-    - delete
-    - get
-    - list
-    - patch
-    - update
-    - watch
-- apiGroups:
     - br.pingcap.com
   resources:
     - backups

@@ -1,0 +1,14 @@
+# The scheduler creates a Backup for the schedule slot, which SyncBackup turns
+# into a BR backup like an on-demand one.
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+spec:
+  origin:
+    type: Instance
+    instanceRef:
+      name: sched
+  classRef:
+    name: br
+  storageRef:
+    name: s3-store
+  scheduleName: every-minute

@@ -34,7 +34,7 @@ YQ_VERSION ?= v4.44.6
 YQ ?= $(LOCALBIN)/yq-$(YQ_VERSION)
 
 # golangci-lint version
-GOLANGCI_LINT_VERSION ?= v2.11.3
+GOLANGCI_LINT_VERSION ?= v2.14.0
 GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 
 # Helm chart directory
@@ -152,6 +152,10 @@ test-integration-core: ## Run core integration tests.
 .PHONY: test-integration-backup
 test-integration-backup: ## Run backup integration tests.
 	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/backup
+
+.PHONY: test-integration-schedule
+test-integration-schedule: ## Run scheduled backup integration tests.
+	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/schedule
 
 .PHONY: test-integration-restore
 test-integration-restore: ## Run restore integration tests.

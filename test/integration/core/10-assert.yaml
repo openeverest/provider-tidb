@@ -20,6 +20,13 @@ spec:
   template:
     spec:
       version: v8.5.2
+      overlay:
+        pod:
+          metadata:
+            labels:
+              core.openeverest.io/component: pd
+              core.openeverest.io/instance: test-instance
+              core.openeverest.io/provider: tidb
       volumes:
         - name: data
           storage: 10Gi
@@ -35,6 +42,13 @@ spec:
   template:
     spec:
       version: v8.5.2
+      overlay:
+        pod:
+          metadata:
+            labels:
+              core.openeverest.io/component: tikv
+              core.openeverest.io/instance: test-instance
+              core.openeverest.io/provider: tidb
       volumes:
         - name: data
           storage: 20Gi
@@ -50,6 +64,13 @@ spec:
   template:
     spec:
       version: v8.5.2
+      overlay:
+        pod:
+          metadata:
+            labels:
+              core.openeverest.io/component: tidb
+              core.openeverest.io/instance: test-instance
+              core.openeverest.io/provider: tidb
 ---
 # The provider generates a random root password and the bootstrap SQL that
 # applies it on first cluster bootstrap.

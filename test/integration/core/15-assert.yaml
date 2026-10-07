@@ -15,6 +15,13 @@ spec:
   template:
     spec:
       version: v8.5.2
+      overlay:
+        pod:
+          metadata:
+            labels:
+              core.openeverest.io/component: tiflash
+              core.openeverest.io/instance: test-instance
+              core.openeverest.io/provider: tidb
       volumes:
         - name: data
           storage: 15Gi
