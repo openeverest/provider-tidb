@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/openeverest/openeverest/v2 v2.0.0-dev.4
 	github.com/pingcap/tidb-operator/api/v2 v2.0.0-20260325134427-c1490b6fd060
+	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/mod v0.41.0
 	k8s.io/api v0.37.1
 	k8s.io/apimachinery v0.37.1

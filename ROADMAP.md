@@ -44,7 +44,7 @@ source of truth for scope; update it as milestones land.
 | `component.version` / `Instance.spec.version` | `template.spec.version` (per group; doubles as image tag) |
 | `component.parameters.config` | `template.spec.config` (inline TOML) |
 | anything unmapped | `template.spec.overlay` (raw K8s patch escape hatch) |
-| `Instance.spec.backup` *(later)* | `br.pingcap.com` `Backup` / `BackupSchedule` + `Restore` |
+| `Instance.spec.backup` | `br.pingcap.com` `Backup` (schedules run by the provider) + `Restore` |
 
 ---
 
@@ -128,7 +128,8 @@ Ordered by value/effort; each phase is independently shippable.
 - **BackupClass** (`ProviderManaged`) backed by `br.pingcap.com`:
   - Snapshot `Backup` to S3 / GCS / Azblob (inlined `StorageProvider` + credential secret).
   - `Restore` from a backup; data-source seeding on new Instances.
-  - `BackupSchedule` (cron) via the runtime's schedule/mirror plumbing.
+  - `BackupSchedule` (cron) — v2 ships the CRD without a controller, so the provider runs the
+    schedules itself and creates a `Backup` per slot (with count/time retention).
 - **PITR:** `backupMode: log` + `restoreMode: pitr`; report restorable-time window via
   `InstanceBackupStatusReporter`.
 

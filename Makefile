@@ -153,6 +153,10 @@ test-integration-core: ## Run core integration tests.
 test-integration-backup: ## Run backup integration tests.
 	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/backup
 
+.PHONY: test-integration-schedule
+test-integration-schedule: ## Run scheduled backup integration tests.
+	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/schedule
+
 .PHONY: test-integration-restore
 test-integration-restore: ## Run restore integration tests.
 	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/restore
