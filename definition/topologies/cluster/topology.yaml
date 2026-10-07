@@ -20,6 +20,7 @@ config:
         properties:
           resources: {}
           replicas: {minimum: 1}
+          schedulingPolicy: {}
     tikv:
       defaults:
         replicas: 3
@@ -29,6 +30,7 @@ config:
           storage: {}
           resources: {}
           replicas: {minimum: 1}
+          schedulingPolicy: {}
     pd:
       defaults:
         replicas: 3
@@ -38,6 +40,7 @@ config:
           storage: {}
           resources: {}
           replicas: {minimum: 1}
+          schedulingPolicy: {}
     tiflash:
       optional: true
       # 0 replicas keeps the component defined but runs no TiFlash nodes.
@@ -47,6 +50,7 @@ config:
           storage: {}
           resources: {}
           replicas: {minimum: 0}
+          schedulingPolicy: {}
 
 ui:
   sections:
