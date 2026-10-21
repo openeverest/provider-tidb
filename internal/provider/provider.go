@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	vmv1beta1 "github.com/VictoriaMetrics/operator/api/operator/v1beta1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
@@ -49,6 +50,7 @@ func New() *Provider {
 				tidbbrv1.Install,
 				monitoringv1.AddToScheme,
 				vmv1beta1.AddToScheme,
+				cmapi.AddToScheme,
 			},
 			WatchConfigs: []controller.WatchConfig{
 				controller.WatchOwned(&tidbcorev1.Cluster{}),

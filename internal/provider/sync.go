@@ -327,14 +327,21 @@ func buildCluster(c *controller.Context) (*tidbcorev1.Cluster, error) {
 	switch {
 	case apierrors.IsNotFound(err):
 		cluster.Spec.BootstrapSQL = &corev1.LocalObjectReference{Name: bootstrapConfigMapName(c.Name())}
-		if tlsSettings(c).Cluster {
+		settings := tlsSettings(c)
+		if settings.Cluster {
 			cluster.Spec.TLSCluster = &tidbcorev1.TLSCluster{Enabled: true}
+		}
+		if source := tlsSource(settings); source != "" {
+			cluster.Annotations = map[string]string{tlsSourceAnnotation: source}
 		}
 	case err != nil:
 		return nil, err
 	default:
 		cluster.Spec.BootstrapSQL = existing.Spec.BootstrapSQL
 		cluster.Spec.TLSCluster = existing.Spec.TLSCluster
+		if source := existing.Annotations[tlsSourceAnnotation]; source != "" {
+			cluster.Annotations = map[string]string{tlsSourceAnnotation: source}
+		}
 	}
 	return cluster, nil
 }

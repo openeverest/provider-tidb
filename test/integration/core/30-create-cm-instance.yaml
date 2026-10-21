@@ -1,0 +1,33 @@
+# A second Instance whose certificates cert-manager issues, from a CA the
+# provider sets up in cert-manager. TLS is chosen at creation, so it cannot be
+# switched on the main Instance.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: cm-instance
+spec:
+  providerRef:
+    name: tidb
+  version: "8.5.2"
+  topology:
+    type: cluster
+    parameters:
+      tls:
+        cluster: true
+        client: true
+        certManager:
+          enabled: true
+  components:
+    pd:
+      type: pd
+      replicas: 1
+      storage:
+        size: 10Gi
+    tikv:
+      type: tikv
+      replicas: 1
+      storage:
+        size: 20Gi
+    tidb:
+      type: tidb
+      replicas: 1

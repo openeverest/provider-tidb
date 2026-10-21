@@ -11,8 +11,15 @@ import (
 // would be published cluster-wide but do nothing.
 func TestUISchemaIsReconciled(t *testing.T) {
 	pinRootPassword(t)
+	certManagerNeedsTLS := "takes effect only with tls.cluster or tls.client on, which the probe leaves off; " +
+		"TestCertManagerFieldsAreReconciled probes it with TLS on"
 	conformance.UISchemaIsReconciled(t, conformance.Config{
 		Provider: New(),
+		Unverifiable: map[string]string{
+			"spec.topology.parameters.tls.certManager.enabled":        certManagerNeedsTLS,
+			"spec.topology.parameters.tls.certManager.issuerRef.name": certManagerNeedsTLS,
+			"spec.topology.parameters.tls.certManager.issuerRef.kind": certManagerNeedsTLS,
+		},
 	})
 }
 
