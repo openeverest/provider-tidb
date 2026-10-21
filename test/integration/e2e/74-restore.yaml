@@ -1,0 +1,12 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: e2e-restore
+spec:
+  instanceRef:
+    name: test-instance
+  dataSource:
+    type: Backup
+    backup:
+      backupRef:
+        name: e2e-backup
