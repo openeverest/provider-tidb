@@ -15,6 +15,9 @@ OPERATOR_VERSION ?= v2.0.1
 # Prometheus Operator version whose PodMonitor CRD the provider targets.
 PROMETHEUS_OPERATOR_VERSION ?= v0.94.1
 
+# VictoriaMetrics Operator version whose VMPodScrape CRD the provider targets.
+VM_OPERATOR_VERSION ?= v0.66.1
+
 # Image URL to use for building/pushing image targets
 IMG ?= ghcr.io/openeverest/provider-tidb-dev:latest
 
@@ -181,7 +184,7 @@ load-openeverest-controller-image: ## Import the OpenEverest controller image in
 	k3d image import ${OPENEVEREST_CONTROLLER_IMG} -c ${K3D_CLUSTER_NAME}
 
 .PHONY: install-crds
-install-crds: ## Install OpenEverest CRDs (and your operator's CRDs) into the cluster.
+install-crds: yq ## Install OpenEverest CRDs (and your operator's CRDs) into the cluster.
 	kubectl apply -f https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_BRANCH)/config/crd/bases/core.openeverest.io_providers.yaml
 	kubectl apply -f https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_BRANCH)/config/crd/bases/core.openeverest.io_instances.yaml
 	kubectl apply -f https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_BRANCH)/config/crd/bases/core.openeverest.io_instancepresets.yaml
@@ -205,6 +208,12 @@ install-crds: ## Install OpenEverest CRDs (and your operator's CRDs) into the cl
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/br.pingcap.com_restores.yaml
 	# Prometheus Operator PodMonitor the provider creates while monitoring is enabled.
 	kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/$(PROMETHEUS_OPERATOR_VERSION)/example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml
+	# VictoriaMetrics Operator VMPodScrape, picked out of the operator's combined CRD manifest.
+	# OpenEverest's monitoring stack already ships it, so only install it when missing.
+	kubectl get crd vmpodscrapes.operator.victoriametrics.com >/dev/null 2>&1 || \
+		curl -fsSL https://raw.githubusercontent.com/VictoriaMetrics/operator/$(VM_OPERATOR_VERSION)/config/crd/overlay/crd.yaml \
+		| $(YQ) 'select(.metadata.name == "vmpodscrapes.operator.victoriametrics.com")' \
+		| kubectl apply --server-side -f -
 
 .PHONY: deploy-provider-ci
 deploy-provider-ci: helm-deps ## Deploy the provider via Helm for CI (IMG must already be imported into k3d).

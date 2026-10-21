@@ -351,7 +351,7 @@ ui:
             - storageClass
     monitoring:
       label: "Monitoring"
-      description: "Collect TiDB metrics with Prometheus."
+      description: "Collect TiDB metrics with Prometheus or VictoriaMetrics."
       components:
         prometheus:
           uiType: toggle
@@ -359,8 +359,15 @@ ui:
           fieldParams:
             label: "Prometheus"
             helperText: "Creates a PodMonitor that scrapes PD, TiKV, TiDB and TiFlash. Requires the Prometheus Operator."
+        victoriaMetrics:
+          uiType: toggle
+          path: spec.topology.parameters.monitoring.victoriaMetrics.enabled
+          fieldParams:
+            label: "VictoriaMetrics"
+            helperText: "Creates a VMPodScrape that scrapes PD, TiKV, TiDB and TiFlash. Requires the VictoriaMetrics Operator."
       componentsOrder:
         - prometheus
+        - victoriaMetrics
     advanced:
       label: "Advanced configuration"
       description: "Per-component configuration overrides."

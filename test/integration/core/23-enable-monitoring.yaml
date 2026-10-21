@@ -1,4 +1,4 @@
-# Turning Prometheus monitoring on for a running Instance.
+# Turning Prometheus and VictoriaMetrics monitoring on for a running Instance.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
@@ -12,3 +12,8 @@ spec:
           interval: 30s
           podMonitorLabels:
             release: kube-prometheus-stack
+        victoriaMetrics:
+          enabled: true
+          interval: 1m
+          podScrapeLabels:
+            team: db

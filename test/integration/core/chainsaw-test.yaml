@@ -18,7 +18,7 @@ spec:
     - script:
         content: kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o yaml
     - script:
-        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,tiflashgroup,podmonitor -o yaml
+        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,tiflashgroup,podmonitor,vmpodscrape -o yaml
     - podLogs:
         namespace: provider-system
         selector: app.kubernetes.io/name=provider-tidb

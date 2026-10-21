@@ -49,6 +49,7 @@ package provider
 // +kubebuilder:rbac:groups=br.pingcap.com,resources=restores,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=br.pingcap.com,resources=restores/status,verbs=get
 
-
 // Prometheus Operator PodMonitor the provider creates while monitoring is enabled.
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=get;list;watch;create;update;patch;delete
+// VictoriaMetrics Operator VMPodScrape the provider creates while monitoring is enabled.
+// +kubebuilder:rbac:groups=operator.victoriametrics.com,resources=vmpodscrapes,verbs=get;list;watch;create;update;patch;delete

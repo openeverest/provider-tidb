@@ -8,3 +8,5 @@ spec:
       monitoring:
         prometheus:
           enabled: false
+        victoriaMetrics:
+          enabled: false

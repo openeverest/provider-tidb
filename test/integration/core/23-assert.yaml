@@ -1,5 +1,5 @@
-# The provider creates one PodMonitor, owned by the Instance and labelled so
-# that plugin-metrics finds it and kube-prometheus-stack selects it. Each
+# The provider creates a PodMonitor and a VMPodScrape, owned by the Instance and labelled so
+# that plugin-metrics finds them and the monitoring systems select them. Each
 # endpoint keeps only its component's pods.
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
@@ -50,3 +50,53 @@ spec:
         - action: keep
           sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
           regex: tiflash
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: test-instance-vm-metrics
+  labels:
+    app.kubernetes.io/managed-by: everest
+    app.kubernetes.io/instance: test-instance
+    core.openeverest.io/provider: tidb
+    team: db
+  ownerReferences:
+    - apiVersion: core.openeverest.io/v1alpha1
+      kind: Instance
+      name: test-instance
+spec:
+  selector:
+    matchLabels:
+      core.openeverest.io/instance: test-instance
+      core.openeverest.io/provider: tidb
+  podTargetLabels:
+    - core.openeverest.io/component
+  podMetricsEndpoints:
+    - port: client
+      path: /metrics
+      interval: 1m
+      relabelConfigs:
+        - action: keep
+          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
+          regex: ["pd"]
+    - port: status
+      path: /metrics
+      interval: 1m
+      relabelConfigs:
+        - action: keep
+          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
+          regex: ["tikv|tidb"]
+    - port: metrics
+      path: /metrics
+      interval: 1m
+      relabelConfigs:
+        - action: keep
+          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
+          regex: ["tiflash"]
+    - port: proxy-metrics
+      path: /metrics
+      interval: 1m
+      relabelConfigs:
+        - action: keep
+          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
+          regex: ["tiflash"]

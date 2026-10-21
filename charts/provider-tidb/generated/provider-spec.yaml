@@ -127,6 +127,17 @@ spec:
                         type: string
                       type: object
                   type: object
+                victoriaMetrics:
+                  properties:
+                    enabled:
+                      type: boolean
+                    interval:
+                      type: string
+                    podScrapeLabels:
+                      additionalProperties:
+                        type: string
+                      type: object
+                  type: object
               type: object
           type: object
   uiSchema:
@@ -202,9 +213,16 @@ spec:
                 label: Prometheus
               path: spec.topology.parameters.monitoring.prometheus.enabled
               uiType: toggle
+            victoriaMetrics:
+              fieldParams:
+                helperText: Creates a VMPodScrape that scrapes PD, TiKV, TiDB and TiFlash. Requires the VictoriaMetrics Operator.
+                label: VictoriaMetrics
+              path: spec.topology.parameters.monitoring.victoriaMetrics.enabled
+              uiType: toggle
           componentsOrder:
             - prometheus
-          description: Collect TiDB metrics with Prometheus.
+            - victoriaMetrics
+          description: Collect TiDB metrics with Prometheus or VictoriaMetrics.
           label: Monitoring
         pd:
           components:

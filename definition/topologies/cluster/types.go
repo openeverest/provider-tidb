@@ -15,6 +15,8 @@ type ClusterTopologyParameters struct {
 type Monitoring struct {
 	// Prometheus configures scraping by the Prometheus Operator.
 	Prometheus *Prometheus `json:"prometheus,omitempty"`
+	// VictoriaMetrics configures scraping by the VictoriaMetrics Operator.
+	VictoriaMetrics *VictoriaMetrics `json:"victoriaMetrics,omitempty"`
 }
 
 // Prometheus configures the PodMonitor that scrapes PD, TiKV, TiDB and TiFlash.
@@ -27,4 +29,17 @@ type Prometheus struct {
 	// PodMonitorLabels are added to the PodMonitor so that the Prometheus
 	// podMonitorSelector picks it up (e.g. release: kube-prometheus-stack).
 	PodMonitorLabels map[string]string `json:"podMonitorLabels,omitempty"`
+}
+
+// VictoriaMetrics configures the VMPodScrape that scrapes PD, TiKV, TiDB and
+// TiFlash.
+type VictoriaMetrics struct {
+	// Enabled creates the VMPodScrape; disabling it removes the VMPodScrape.
+	Enabled bool `json:"enabled,omitempty"`
+	// Interval between scrapes, e.g. 30s. Defaults to the VMAgent's global
+	// scrape interval.
+	Interval string `json:"interval,omitempty"`
+	// PodScrapeLabels are added to the VMPodScrape so that a VMAgent's
+	// podScrapeSelector picks it up.
+	PodScrapeLabels map[string]string `json:"podScrapeLabels,omitempty"`
 }
