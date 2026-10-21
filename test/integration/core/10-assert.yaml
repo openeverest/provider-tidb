@@ -8,6 +8,8 @@ metadata:
 spec:
   bootstrapSQL:
     name: test-instance-tidb-bootstrap-sql
+  tlsCluster:
+    enabled: true
 ---
 apiVersion: core.pingcap.com/v1alpha1
 kind: PDGroup
@@ -64,6 +66,10 @@ spec:
   template:
     spec:
       version: v7.5.5
+      security:
+        tls:
+          mysql:
+            enabled: true
       overlay:
         pod:
           metadata:
@@ -84,3 +90,76 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: test-instance-tidb-bootstrap-sql
+---
+# The provider issues the certificates from a CA it generates for the Instance,
+# under the names the operator mounts, owned by the Cluster so they outlive the
+# pods during teardown.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-instance-tls-ca
+  ownerReferences:
+    - apiVersion: core.pingcap.com/v1alpha1
+      kind: Cluster
+      name: test-instance
+type: Opaque
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-instance-pd-cluster-secret
+  ownerReferences:
+    - apiVersion: core.pingcap.com/v1alpha1
+      kind: Cluster
+      name: test-instance
+type: kubernetes.io/tls
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-instance-tikv-cluster-secret
+  ownerReferences:
+    - apiVersion: core.pingcap.com/v1alpha1
+      kind: Cluster
+      name: test-instance
+type: kubernetes.io/tls
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-instance-tidb-cluster-secret
+  ownerReferences:
+    - apiVersion: core.pingcap.com/v1alpha1
+      kind: Cluster
+      name: test-instance
+type: kubernetes.io/tls
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-instance-tiflash-cluster-secret
+  ownerReferences:
+    - apiVersion: core.pingcap.com/v1alpha1
+      kind: Cluster
+      name: test-instance
+type: kubernetes.io/tls
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-instance-cluster-client-secret
+  ownerReferences:
+    - apiVersion: core.pingcap.com/v1alpha1
+      kind: Cluster
+      name: test-instance
+type: kubernetes.io/tls
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-instance-tidb-server-secret
+  ownerReferences:
+    - apiVersion: core.pingcap.com/v1alpha1
+      kind: Cluster
+      name: test-instance
+type: kubernetes.io/tls

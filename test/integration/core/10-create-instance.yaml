@@ -1,6 +1,7 @@
 # Instance applied by the create-instance step. Single node per component for a
 # fast lifecycle test (PD replicas must be odd; 1 is valid). It starts on the
-# older version bundle so the upgrade-version step can move it to the default.
+# older version bundle so the upgrade-version step can move it to the default,
+# with both kinds of TLS on as the UI creates it.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
@@ -11,6 +12,10 @@ spec:
   version: "7.5.5"
   topology:
     type: cluster
+    parameters:
+      tls:
+        cluster: true
+        client: true
   components:
     pd:
       type: pd

@@ -9,6 +9,19 @@ package cluster
 type ClusterTopologyParameters struct {
 	// Monitoring configures metrics collection.
 	Monitoring *Monitoring `json:"monitoring,omitempty"`
+	// TLS configures encryption. Both settings are chosen when the Instance is
+	// created and cannot be changed afterwards.
+	TLS *TLS `json:"tls,omitempty"`
+}
+
+// TLS configures encryption with certificates the provider issues from a CA
+// it generates for the Instance.
+type TLS struct {
+	// Cluster encrypts and mutually authenticates the traffic between PD, TiKV,
+	// TiDB and TiFlash.
+	Cluster bool `json:"cluster,omitempty"`
+	// Client lets MySQL clients connect to TiDB over TLS.
+	Client bool `json:"client,omitempty"`
 }
 
 // Monitoring configures metrics collection for the instance.

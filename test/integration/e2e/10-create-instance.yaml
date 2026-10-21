@@ -1,6 +1,7 @@
 # Instance the real TiDB Operator provisions, on the default version bundle.
 # A single-TiKV cluster keeps one copy of every region, which also lets the
-# scale-in step take TiKV back down to one node.
+# scale-in step take TiKV back down to one node. Both kinds of TLS are on, as
+# the UI creates new Instances.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
@@ -11,6 +12,10 @@ spec:
   version: "8.5.2"
   topology:
     type: cluster
+    parameters:
+      tls:
+        cluster: true
+        client: true
   components:
     pd:
       type: pd

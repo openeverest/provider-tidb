@@ -349,6 +349,33 @@ ui:
             - replicas
             - resources
             - storageClass
+    security:
+      label: "Security"
+      description: "Encrypt traffic with certificates the provider issues for this cluster. Can only be chosen when the cluster is created."
+      components:
+        clusterTLS:
+          uiType: toggle
+          path: spec.topology.parameters.tls.cluster
+          fieldParams:
+            label: "Encrypt traffic between components (mTLS)"
+            helperText: "PD, TiKV, TiDB and TiFlash authenticate each other with certificates and encrypt their traffic."
+            defaultValue: true
+            modes:
+              edit:
+                disabled: true
+        clientTLS:
+          uiType: toggle
+          path: spec.topology.parameters.tls.client
+          fieldParams:
+            label: "Encrypt client connections (TLS)"
+            helperText: "MySQL clients can connect to TiDB over TLS and verify it with the CA in the connection secret."
+            defaultValue: true
+            modes:
+              edit:
+                disabled: true
+      componentsOrder:
+        - clusterTLS
+        - clientTLS
     monitoring:
       label: "Monitoring"
       description: "Collect TiDB metrics with Prometheus or VictoriaMetrics."
@@ -415,5 +442,6 @@ ui:
     - tikv
     - tiflash
     - pd
+    - security
     - monitoring
     - advanced

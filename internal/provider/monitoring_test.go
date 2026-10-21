@@ -49,7 +49,8 @@ type scrapeTarget struct{ port, keep string }
 
 var wantScrapeTargets = []scrapeTarget{
 	{tidbcorev1.PDPortNameClient, "pd"},
-	{tidbcorev1.TiKVPortNameStatus, "tikv|tidb"},
+	{tidbcorev1.TiKVPortNameStatus, "tikv"},
+	{tidbcorev1.TiDBPortNameStatus, "tidb"},
 	{tidbcorev1.TiFlashPortNameMetrics, "tiflash"},
 	{tidbcorev1.TiFlashPortNameProxyStatus, "tiflash"},
 }
@@ -311,4 +312,55 @@ func monitoringScheme(t *testing.T) *runtime.Scheme {
 		}
 	}
 	return scheme
+}
+
+// With mTLS between components every metrics endpoint serves https and wants
+// the cluster client certificate; each is verified by its service name.
+func TestScrapeObjectsOverClusterTLS(t *testing.T) {
+	c := controller.NewContext(context.Background(), fake.NewClientBuilder().Build(),
+		monitoredInstance(t, tlsTopology(true, false)), common.ProviderName)
+	secretKey := func(name, key string) string { return name + "/" + key }
+	want := func(component string) string {
+		return "https ca=" + secretKey("orders-cluster-client-secret", "ca.crt") +
+			" cert=" + secretKey("orders-cluster-client-secret", "tls.crt") +
+			" key=" + secretKey("orders-cluster-client-secret", "tls.key") +
+			" server=orders-" + component
+	}
+
+	pm := buildPodMonitor(c, scrapeSettings{}, nil).(*monitoringv1.PodMonitor)
+	for i, ep := range pm.Spec.PodMetricsEndpoints {
+		tls := ep.TLSConfig
+		if tls == nil || ep.Scheme == nil {
+			t.Fatalf("PodMonitor endpoint %d: no TLS", i)
+		}
+		got := ep.Scheme.String() + " ca=" + secretKey(tls.CA.Secret.Name, tls.CA.Secret.Key) +
+			" cert=" + secretKey(tls.Cert.Secret.Name, tls.Cert.Secret.Key) +
+			" key=" + secretKey(tls.KeySecret.Name, tls.KeySecret.Key) + " server=" + ptr.Deref(tls.ServerName, "")
+		if w := want(wantScrapeTargets[i].keep); got != w {
+			t.Errorf("PodMonitor endpoint %d: %s, want %s", i, got, w)
+		}
+	}
+
+	ps := buildVMPodScrape(c, scrapeSettings{}, nil).(*vmv1beta1.VMPodScrape)
+	for i, ep := range ps.Spec.PodMetricsEndpoints {
+		tls := ep.TLSConfig
+		if tls == nil {
+			t.Fatalf("VMPodScrape endpoint %d: no TLS", i)
+		}
+		got := ep.Scheme + " ca=" + secretKey(tls.CA.Secret.Name, tls.CA.Secret.Key) +
+			" cert=" + secretKey(tls.Cert.Secret.Name, tls.Cert.Secret.Key) +
+			" key=" + secretKey(tls.KeySecret.Name, tls.KeySecret.Key) + " server=" + tls.ServerName
+		if w := want(wantScrapeTargets[i].keep); got != w {
+			t.Errorf("VMPodScrape endpoint %d: %s, want %s", i, got, w)
+		}
+	}
+
+	// Client TLS alone leaves the metrics endpoints on plain http.
+	c = controller.NewContext(context.Background(), fake.NewClientBuilder().Build(),
+		monitoredInstance(t, tlsTopology(false, true)), common.ProviderName)
+	for _, ep := range buildPodMonitor(c, scrapeSettings{}, nil).(*monitoringv1.PodMonitor).Spec.PodMetricsEndpoints {
+		if ep.TLSConfig != nil || ep.Scheme != nil {
+			t.Errorf("client TLS only: endpoint %s has TLS", ptr.Deref(ep.Port, ""))
+		}
+	}
 }

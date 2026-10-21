@@ -1,0 +1,15 @@
+# Validate rejects the change, and the Cluster keeps TLS on.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+status:
+  phase: Failed
+---
+apiVersion: core.pingcap.com/v1alpha1
+kind: Cluster
+metadata:
+  name: test-instance
+spec:
+  tlsCluster:
+    enabled: true

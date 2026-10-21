@@ -139,6 +139,13 @@ spec:
                       type: object
                   type: object
               type: object
+            tls:
+              properties:
+                client:
+                  type: boolean
+                cluster:
+                  type: boolean
+              type: object
           type: object
   uiSchema:
     cluster:
@@ -303,6 +310,33 @@ spec:
               uiType: group
           description: Metadata, timestamp and scheduling nodes. Use an odd number for quorum.
           label: Placement Driver (PD)
+        security:
+          components:
+            clientTLS:
+              fieldParams:
+                defaultValue: true
+                helperText: MySQL clients can connect to TiDB over TLS and verify it with the CA in the connection secret.
+                label: Encrypt client connections (TLS)
+                modes:
+                  edit:
+                    disabled: true
+              path: spec.topology.parameters.tls.client
+              uiType: toggle
+            clusterTLS:
+              fieldParams:
+                defaultValue: true
+                helperText: PD, TiKV, TiDB and TiFlash authenticate each other with certificates and encrypt their traffic.
+                label: Encrypt traffic between components (mTLS)
+                modes:
+                  edit:
+                    disabled: true
+              path: spec.topology.parameters.tls.cluster
+              uiType: toggle
+          componentsOrder:
+            - clusterTLS
+            - clientTLS
+          description: Encrypt traffic with certificates the provider issues for this cluster. Can only be chosen when the cluster is created.
+          label: Security
         tidb:
           components:
             tidbGroup:
@@ -502,6 +536,7 @@ spec:
         - tikv
         - tiflash
         - pd
+        - security
         - monitoring
         - advanced
   versions:

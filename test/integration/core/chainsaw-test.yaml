@@ -60,6 +60,9 @@ spec:
               pw=$(kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath='{.data.password}' | base64 -d)
               test -n "$pw" || { echo "connection secret has empty password"; exit 1; }
               echo "connection secret password length: ${#pw}"
+              # With client TLS the connection secret carries the CA to verify TiDB with.
+              kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath='{.data.ca\.crt}' | base64 -d | grep -q "BEGIN CERTIFICATE" \
+                || { echo "connection secret has no CA"; exit 1; }
 
     - name: rollout-reports-updating
       try:
@@ -192,6 +195,18 @@ spec:
             file: 24-disable-monitoring.yaml
         - error:
             file: 24-error.yaml
+        - assert:
+            file: 11-assert.yaml
+
+    - name: changing-tls-rejected
+      try:
+        - patch:
+            file: 25-disable-cluster-tls.yaml
+        - assert:
+            file: 25-assert.yaml
+        # Asking for the original setting again brings the Instance back.
+        - patch:
+            file: 25-restore-cluster-tls.yaml
         - assert:
             file: 11-assert.yaml
 

@@ -1,5 +1,7 @@
 # One-shot MySQL client that authenticates with the credentials the provider
-# published in <instance>-conn and requires `SELECT 1` to return 1.
+# published in <instance>-conn, verifies TiDB's certificate and host name
+# against the CA published there too, requires `SELECT 1` to return 1 and the
+# session to be encrypted.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -14,7 +16,11 @@ spec:
       command:
         - sh
         - -c
-        - test "$(mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s -e 'SELECT 1')" = "1"
+        - |
+          set -e
+          q() { mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" --ssl-mode=VERIFY_IDENTITY --ssl-ca=/tls/ca.crt -N -s -e "$1"; }
+          test "$(q 'SELECT 1')" = "1"
+          q "SHOW SESSION STATUS LIKE 'Ssl_version'" | grep TLS
       env:
         - name: DB_HOST
           valueFrom:
@@ -37,3 +43,14 @@ spec:
             secretKeyRef:
               name: test-instance-conn
               key: password
+      volumeMounts:
+        - name: tls
+          mountPath: /tls
+          readOnly: true
+  volumes:
+    - name: tls
+      secret:
+        secretName: test-instance-conn
+        items:
+          - key: ca.crt
+            path: ca.crt

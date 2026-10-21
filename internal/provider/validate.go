@@ -41,5 +41,8 @@ func ValidateTiDB(c *controller.Context) error {
 	if err := validateMonitoring(c); err != nil {
 		return err
 	}
+	if err := validateTLS(c); err != nil {
+		return err
+	}
 	return validateStorage(c)
 }
