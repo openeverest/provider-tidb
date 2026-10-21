@@ -134,6 +134,9 @@ func ensureTLSSecrets(c *controller.Context, owner *tidbcorev1.Cluster) error {
 	if len(leaves) == 0 {
 		return nil
 	}
+	if usesCertManager(settings) {
+		return ensureCertManagerCertificates(c, owner, settings, leaves)
+	}
 
 	ca, err := ensureCA(c, owner, leaves)
 	if err != nil {
@@ -223,10 +226,11 @@ func createOwnedByCluster(c *controller.Context, owner *tidbcorev1.Cluster, secr
 	return nil
 }
 
-// readCA returns the Instance's CA certificate, or nil before it exists.
-func readCA(c *controller.Context) ([]byte, error) {
+// readClientCA returns the CA that signed TiDB's MySQL certificate, or nil
+// before it is issued. The Secret carries it whoever issued the certificate.
+func readClientCA(c *controller.Context) ([]byte, error) {
 	secret := &corev1.Secret{}
-	if err := c.Get(secret, tlsCASecretName(c.Name())); err != nil {
+	if err := c.Get(secret, mysqlServerTLSSecretName(c.Name())); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, nil
 		}
@@ -336,6 +340,9 @@ func pemEncode(blockType string, der []byte) []byte {
 // operator only takes them when the cluster is created.
 func validateTLS(c *controller.Context) error {
 	requested := tlsSettings(c)
+	if err := validateCertManager(c, requested); err != nil {
+		return err
+	}
 
 	cluster := &tidbcorev1.Cluster{}
 	found, err := c.Exists(cluster, c.Name())
@@ -346,6 +353,11 @@ func validateTLS(c *controller.Context) error {
 		current := cluster.Spec.TLSCluster != nil && cluster.Spec.TLSCluster.Enabled
 		if requested.Cluster != current {
 			return fmt.Errorf("tls.cluster cannot be changed after the Instance is created: it is %s", onOff(current))
+		}
+		// A new CA would not verify the certificates the pods already use.
+		currentSource := currentTLSSource(cluster, current || requested.Client)
+		if want := tlsSource(requested); want != "" && currentSource != "" && want != currentSource {
+			return fmt.Errorf("the TLS certificate source cannot be changed after the Instance is created: it is %s", currentSource)
 		}
 	}
 

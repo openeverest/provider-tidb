@@ -1,0 +1,83 @@
+# The Cluster records cert-manager as its certificate source. The provider sets
+# up a self-signed issuer, a CA certificate and a CA issuer, and asks cert-manager
+# for every certificate under the Secret names the operator mounts, all owned
+# by the Cluster.
+apiVersion: core.pingcap.com/v1alpha1
+kind: Cluster
+metadata:
+  name: cm-instance
+  annotations:
+    tidb.openeverest.io/tls-certificates: cert-manager
+spec:
+  tlsCluster:
+    enabled: true
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: cm-instance-tls-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cm-instance-tls-ca
+spec:
+  isCA: true
+  secretName: cm-instance-tls-ca
+  issuerRef:
+    name: cm-instance-tls-selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: cm-instance-tls-ca
+spec:
+  ca:
+    secretName: cm-instance-tls-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cm-instance-pd-cluster-secret
+  ownerReferences:
+    - apiVersion: core.pingcap.com/v1alpha1
+      kind: Cluster
+      name: cm-instance
+spec:
+  secretName: cm-instance-pd-cluster-secret
+  commonName: TiDB
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+    - client auth
+  issuerRef:
+    name: cm-instance-tls-ca
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cm-instance-cluster-client-secret
+spec:
+  secretName: cm-instance-cluster-client-secret
+  usages:
+    - digital signature
+    - key encipherment
+    - client auth
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cm-instance-tidb-server-secret
+spec:
+  secretName: cm-instance-tidb-server-secret
+  commonName: cm-instance-tidb
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth

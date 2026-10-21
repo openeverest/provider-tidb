@@ -249,6 +249,24 @@ spec:
         - assert:
             file: 13-assert.yaml
 
+    - name: cert-manager-certificates
+      try:
+        - apply:
+            file: 30-create-cm-instance.yaml
+        - assert:
+            file: 30-assert.yaml
+        - delete:
+            ref:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              name: cm-instance
+        - wait:
+            apiVersion: core.openeverest.io/v1alpha1
+            kind: Instance
+            name: cm-instance
+            for:
+              deletion: {}
+
     - name: delete-instance
       try:
         - delete:

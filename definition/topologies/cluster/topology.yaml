@@ -373,9 +373,45 @@ ui:
             modes:
               edit:
                 disabled: true
+        certManager:
+          uiType: toggle
+          path: spec.topology.parameters.tls.certManager.enabled
+          fieldParams:
+            label: "Issue certificates with cert-manager"
+            helperText: "cert-manager issues the certificates instead of the provider. Requires cert-manager in the cluster."
+            defaultValue: false
+            modes:
+              edit:
+                disabled: true
+        issuerName:
+          uiType: text
+          path: spec.topology.parameters.tls.certManager.issuerRef.name
+          fieldParams:
+            label: "cert-manager issuer (optional)"
+            helperText: "An Issuer in this namespace or a ClusterIssuer that signs the certificates and provides the CA (ca.crt). Leave empty for a CA cert-manager creates for this cluster."
+            modes:
+              edit:
+                disabled: true
+        issuerKind:
+          uiType: select
+          path: spec.topology.parameters.tls.certManager.issuerRef.kind
+          fieldParams:
+            label: "Issuer kind"
+            defaultValue: Issuer
+            options:
+              - label: Issuer
+                value: Issuer
+              - label: ClusterIssuer
+                value: ClusterIssuer
+            modes:
+              edit:
+                disabled: true
       componentsOrder:
         - clusterTLS
         - clientTLS
+        - certManager
+        - issuerName
+        - issuerKind
     monitoring:
       label: "Monitoring"
       description: "Collect TiDB metrics with Prometheus or VictoriaMetrics."
