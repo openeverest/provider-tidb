@@ -38,5 +38,8 @@ func ValidateTiDB(c *controller.Context) error {
 	if err := validateTiKVScaleIn(c); err != nil {
 		return err
 	}
+	if err := validateMonitoring(c); err != nil {
+		return err
+	}
 	return validateStorage(c)
 }

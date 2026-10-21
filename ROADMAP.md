@@ -99,9 +99,9 @@ bundles that pin pd/tikv/tidb to the same TiDB version. The default is named by 
 - [x] `Validate` / `Sync` / `Status` / `Cleanup` implemented, mapping the Instance onto `Cluster` + PD/TiKV/TiDB groups.
 - [x] Unit tests, and the provider-runtime conformance suite (UI paths reconciled + supported fields honoured) pass; `go build`, `go vet`, `golangci-lint`, and generated-file output are clean.
 - [x] Chainsaw integration suite passes on a live k3d cluster: create Instance → provider produces schema-valid TiDB v2 CRs (`Cluster` + PD/TiKV/TiDB groups) → simulated group readiness → Instance reports `Ready` with a MySQL connection secret → delete cascades. (Operator readiness is simulated; no real TiDB pods.)
-- [ ] Full end-to-end against the real TiDB Operator provisioning actual pods.
+- [x] Full end-to-end against the real TiDB Operator provisioning actual pods.
 - [x] Update paths (resize / scale / version bump) covered by tests.
-- [ ] README compatibility + capability tables reviewed for the MVP surface.
+- [x] README compatibility + capability tables reviewed for the MVP surface.
 
 ### Explicitly OUT of MVP
 - TiFlash, TiCDC, TiProxy, PD micro-services (TSO/Scheduling/Router/ResourceManager), DM.
@@ -141,7 +141,9 @@ Ordered by value/effort; each phase is independently shippable.
 - **External access:** map `component.service` → v2 `server`/expose for LoadBalancer/NodePort.
 
 ### Phase 4 — Observability & security
-- **Monitoring:** wire a `MonitoringConfig` reference; expose metrics endpoints; optional dashboard.
+- **Monitoring:** Prometheus Operator `PodMonitor` or VictoriaMetrics `VMPodScrape` for every
+  component; the Metrics plugin's TiDB dashboard reads the Prometheus one (done). Referencing a `MonitoringConfig` waits on the Instance API
+  offering a field for it.
 - **TLS:** cluster-internal mTLS (`Cluster.spec.tlsCluster`), client TLS for TiDB (MySQL).
 - **Security Enhanced Mode**, auth-token config surfacing where appropriate.
 

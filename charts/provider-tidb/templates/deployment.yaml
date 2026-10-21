@@ -62,8 +62,12 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- with .Values.extraEnv }}
           env:
+            - name: POD_MONITOR_LABELS
+              value: {{ (.Values.podMonitor | default dict).labels | default dict | toJson | quote }}
+            - name: VM_POD_SCRAPE_LABELS
+              value: {{ (.Values.vmPodScrape | default dict).labels | default dict | toJson | quote }}
+          {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- with .Values.extraVolumeMounts }}

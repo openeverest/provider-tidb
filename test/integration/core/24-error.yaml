@@ -1,0 +1,10 @@
+# Turning monitoring off removes the PodMonitor and the VMPodScrape.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: test-instance-metrics
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: test-instance-vm-metrics

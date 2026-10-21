@@ -73,7 +73,7 @@ is covered under [Installation](#installation).
 | Custom configuration | ✅ | Inline TOML `config` per component |
 | Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
 | Version upgrades | ✅ | Change the version bundle; the operator rolls PD → TiFlash → TiKV → TiDB. Downgrades are rejected |
-| Monitoring | ❌ | Planned |
+| Monitoring | ✅ | Prometheus `PodMonitor` or VictoriaMetrics `VMPodScrape` for PD, TiKV, TiDB and TiFlash (see [Monitoring](#monitoring)) |
 | TLS | ❌ | Planned |
 
 Stateful components (PD, TiKV, TiFlash) additionally report:
@@ -251,6 +251,54 @@ Presets pin the default version bundle; a unit test fails if they fall behind it
 list itself
 live under `presets:` in [values.yaml](charts/provider-tidb/values.yaml); set `enabled: false`
 to hide one.
+
+### Monitoring
+
+PD, TiKV, TiDB and TiFlash serve Prometheus metrics natively, so no exporter is needed. The
+**Monitoring** section of the UI (`spec.topology.parameters.monitoring`) has a toggle per
+monitoring system; each makes the provider create one scrape object for every component's
+`/metrics` endpoint:
+
+| Toggle | Creates | Requires |
+|---|---|---|
+| **Prometheus** (`monitoring.prometheus`) | `PodMonitor` `<instance>-metrics` | [Prometheus Operator](https://prometheus-operator.dev/) |
+| **VictoriaMetrics** (`monitoring.victoriaMetrics`) | `VMPodScrape` `<instance>-vm-metrics` | [VictoriaMetrics Operator](https://docs.victoriametrics.com/operator/) |
+
+```yaml
+spec:
+  topology:
+    type: cluster
+    parameters:
+      monitoring:
+        prometheus:
+          enabled: true
+          interval: 30s                       # optional; defaults to the global scrape interval
+          podMonitorLabels:                   # optional; see below
+            release: kube-prometheus-stack
+        victoriaMetrics:
+          enabled: true
+          interval: 30s                       # optional
+          podScrapeLabels: {}                 # optional; see below
+```
+
+Both objects are owned by the Instance and removed when their toggle is turned off. They carry
+the `app.kubernetes.io/managed-by: everest` and `app.kubernetes.io/instance: <instance>` labels
+the [Metrics plugin](https://github.com/openeverest/plugin-metrics) finds a `PodMonitor` by, so its
+*Metrics* tab shows the built-in TiDB dashboard for Prometheus. Validation rejects turning a
+toggle on while its CRD is not installed.
+
+A monitoring system only scrapes the objects its selector matches. kube-prometheus-stack, for
+example, selects `PodMonitor`s labelled `release: <its release name>`; a `VMAgent` with
+`selectAllByDefault: true` takes every `VMPodScrape`. Set the labels once
+for every Instance with the chart's `podMonitor.labels` / `vmPodScrape.labels`, or per Instance
+with `podMonitorLabels` / `podScrapeLabels` (which win on conflicts).
+
+> [!NOTE]
+> Turn on the toggle of the monitoring system you run; the provider creates its scrape object
+> itself rather than relying on a VictoriaMetrics Operator converting the `PodMonitor`. If your
+> VictoriaMetrics Operator does convert Prometheus Operator objects, it also turns the
+> `PodMonitor` into a `VMPodScrape` named `<instance>-metrics`, so with both toggles on a
+> `VMAgent` scrapes every component twice.
 
 ## Topologies
 

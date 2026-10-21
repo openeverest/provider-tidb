@@ -261,6 +261,22 @@ presets:
           storage:
             size: 100Gi
 
+# PodMonitor the provider creates for every Instance with
+# spec.topology.parameters.monitoring.prometheus.enabled set.
+podMonitor:
+  # -- Labels added to every PodMonitor so that the Prometheus podMonitorSelector
+  # picks it up, e.g. `release: kube-prometheus-stack`. An Instance's own
+  # monitoring.prometheus.podMonitorLabels take precedence.
+  labels: {}
+
+# VMPodScrape the provider creates for every Instance with
+# spec.topology.parameters.monitoring.victoriaMetrics.enabled set.
+vmPodScrape:
+  # -- Labels added to every VMPodScrape so that a VMAgent podScrapeSelector
+  # picks it up. An Instance's own monitoring.victoriaMetrics.podScrapeLabels
+  # take precedence.
+  labels: {}
+
 # -- Additional environment variables to set on the provider container
 extraEnv: []
 # - name: MY_VAR

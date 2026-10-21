@@ -18,7 +18,7 @@ spec:
     - script:
         content: kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o yaml
     - script:
-        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,tiflashgroup -o yaml
+        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,tiflashgroup,podmonitor,vmpodscrape -o yaml
     - podLogs:
         namespace: provider-system
         selector: app.kubernetes.io/name=provider-tidb
@@ -174,6 +174,24 @@ spec:
         # Reverting the request brings the Instance straight back.
         - patch:
             file: 21-scale-in-tikv.yaml
+        - assert:
+            file: 11-assert.yaml
+
+    - name: enable-monitoring
+      try:
+        - patch:
+            file: 23-enable-monitoring.yaml
+        - assert:
+            file: 23-assert.yaml
+        - assert:
+            file: 11-assert.yaml
+
+    - name: disable-monitoring
+      try:
+        - patch:
+            file: 24-disable-monitoring.yaml
+        - error:
+            file: 24-error.yaml
         - assert:
             file: 11-assert.yaml
 
