@@ -56,7 +56,17 @@ work is delegated to the operator.
 
 | provider-tidb | OpenEverest | TiDB Operator | Kubernetes |
 |---|---|---|---|
+| `0.2.x` | `>= 2.0.0` | `v2.0.1` | `1.30` – `1.36` |
 | `0.1.x` | `>= 2.0.0` | `v2.0.1` | `1.30` – `1.36` |
+
+Optional integrations, needed only for the features that use them:
+
+| Feature | Requires | Tested with |
+|---|---|---|
+| [Monitoring](#monitoring) → Prometheus | Prometheus Operator (`PodMonitor`, `monitoring.coreos.com/v1`) | kube-prometheus-stack |
+| [Monitoring](#monitoring) → VictoriaMetrics | VictoriaMetrics Operator (`VMPodScrape`, `operator.victoriametrics.com/v1beta1`) | `v0.54.1` |
+| [Certificates from cert-manager](#certificates-from-cert-manager) | cert-manager | `v1.20.2` |
+| [Backups and restores](#capabilities) | S3-compatible object storage | AWS S3 API, SeaweedFS |
 
 The bundled operator manages TiDB engine versions independently (see [Versions](#versions)).
 
@@ -150,12 +160,26 @@ The chart is self-contained:
 Upgrade and uninstall:
 
 ```bash
-helm upgrade provider-tidb oci://ghcr.io/openeverest/charts/provider-tidb
+helm upgrade provider-tidb oci://ghcr.io/openeverest/charts/provider-tidb \
+  --version <chart-version> --namespace everest-system
 helm uninstall provider-tidb --namespace everest-system
 ```
 
 Uninstalling the chart does **not** delete running `Instance` resources, the TiDB CRDs, or any
 data.
+
+### Upgrading from 0.1.x
+
+- Existing Instances are left as they are: the provider does not restart their pods or change
+  their TiDB resources, and they stay plaintext. TLS ([Security](#security)) can only be chosen
+  when an Instance is created; new Instances get it by default in the UI.
+- The chart grants the provider new permissions: ServiceAccounts, Roles and RoleBindings (for the
+  account BR jobs run as), `PodMonitor`s, `VMPodScrape`s and cert-manager `Issuer`s and
+  `Certificate`s. `helm upgrade --reuse-values` works.
+- BR backup and restore jobs could not start in 0.1.x
+  ([#63](https://github.com/openeverest/provider-tidb/issues/63)). A `Backup` or `Restore` still
+  `Running` from before the upgrade keeps waiting for a job that cannot start; delete it and
+  create it again.
 
 ### Air-gapped installs
 
@@ -465,6 +489,20 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 | Operator pod `CrashLoopBackOff` at startup | The TiDB CRDs must exist before the operator starts (see the row above) |
 | Groups created but no pods | Inspect the group/instance status (`kubectl get tidbgroup,tikvgroup,pdgroup`) — the failure is upstream in the operator |
 | Storage size raised but PVCs unchanged | The StorageClass must allow volume expansion; check `kubectl get pvc` and the operator logs |
+| `Instance` turns `Failed` right after an edit, with no message | The provider rejected the change. The reason is in the provider logs (`Validation failed`); see [Known issues](#known-issues). Typical causes: shrinking storage, downgrading or reordering versions, scaling TiKV below PD's `max-replicas`, changing TLS after creation. Revert the change to return to `Ready` |
+| `Backup` or `Restore` stays `Running` | `kubectl get jobs` in the Instance's namespace and the BR job's pod logs; the BR `Backup`/`Restore` (`backups.br.pingcap.com`) conditions carry the reason |
+| Clients cannot log in after a restore | See [Known issues](#known-issues) |
+
+## Known issues
+
+- **Rejected changes show no reason.** When `Validate` rejects a change the `Instance` turns
+  `Failed` without a message; the reason is only in the provider logs. Fixed in the OpenEverest
+  provider runtime (openeverest/openeverest#3346) and picked up once a release includes it.
+- **Root password after a restore** ([#64](https://github.com/openeverest/provider-tidb/issues/64)).
+  A restore brings back the backed-up `mysql.user`, so after restoring another Instance's backup the
+  root password is that Instance's, not the one in `<instance>-conn`.
+- **No certificate rotation** ([#66](https://github.com/openeverest/provider-tidb/issues/66)).
+  Certificates are issued for ten years and not renewed (see [Security](#security)).
 
 ## Contributing
 
