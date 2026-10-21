@@ -1,0 +1,42 @@
+# A throwaway S3 endpoint (SeaweedFS) for the backup and restore steps, with
+# one identity and an emptyDir: the data only lives as long as the test.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-config
+stringData:
+  s3.json: |
+    {"identities":[{"name":"test","credentials":[{"accessKey":"test-access-key","secretKey":"test-secret-key"}],"actions":["Admin","Read","Write","List","Tagging"]}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: s3}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: s3}
+    spec:
+      containers:
+        - name: weed
+          image: chrislusf/seaweedfs:3.97
+          args: ["server", "-dir=/data", "-s3", "-s3.port=9000", "-s3.config=/etc/s3/s3.json", "-master.volumeSizeLimitMB=512"]
+          ports: [{containerPort: 9000}]
+          readinessProbe:
+            tcpSocket: {port: 9000}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: config, mountPath: /etc/s3}
+      volumes:
+        - {name: data, emptyDir: {}}
+        - {name: config, secret: {secretName: s3-config}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3
+spec:
+  selector: {app.kubernetes.io/name: s3}
+  ports: [{port: 9000, targetPort: 9000}]

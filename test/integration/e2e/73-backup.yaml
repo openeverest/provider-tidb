@@ -1,0 +1,13 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+metadata:
+  name: e2e-backup
+spec:
+  origin:
+    type: Instance
+    instanceRef:
+      name: test-instance
+  classRef:
+    name: br
+  storageRef:
+    name: s3-store

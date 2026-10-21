@@ -1,0 +1,6 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: e2e-restore
+status:
+  state: Succeeded

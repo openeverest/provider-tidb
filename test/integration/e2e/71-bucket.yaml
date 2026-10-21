@@ -1,0 +1,17 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: s3-bucket
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: aws
+          image: amazon/aws-cli:2.27.0
+          args: ["--endpoint-url", "http://s3:9000", "s3", "mb", "s3://e2e-backups"]
+          env:
+            - {name: AWS_ACCESS_KEY_ID, value: test-access-key}
+            - {name: AWS_SECRET_ACCESS_KEY, value: test-secret-key}
+            - {name: AWS_DEFAULT_REGION, value: us-east-1}

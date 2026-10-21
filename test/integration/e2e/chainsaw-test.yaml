@@ -10,7 +10,8 @@ spec:
   description: |
     Create an Instance, wait for the operator to bring up PD/TiKV/TiDB pods,
     run SELECT 1 with the connection-secret credentials, scale TiKV out and
-    back in without losing data, then delete.
+    back in without losing data, back the data up to an in-cluster S3 and
+    restore it, then delete.
 
   # Image pulls and first cluster bootstrap take minutes, not seconds.
   timeouts:
@@ -24,6 +25,8 @@ spec:
         content: kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o yaml
     - script:
         content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,pd,tikv,tidb -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get backups.backup.openeverest.io,restores.backup.openeverest.io,backups.br.pingcap.com,restores.br.pingcap.com,jobs -o yaml
     - script:
         content: kubectl -n $NAMESPACE get pods,pvc,events -o wide
     - script:
@@ -128,6 +131,45 @@ spec:
               up=$(sql "SELECT COUNT(*) FROM information_schema.TIKV_STORE_STATUS WHERE STORE_STATE_NAME = 'Up';")
               echo "up stores: $up"
               [ "$up" = "1" ]
+
+    - name: backup
+      try:
+        - apply:
+            file: 70-s3.yaml
+        - assert:
+            file: 70-assert.yaml
+        - apply:
+            file: 71-bucket.yaml
+        - assert:
+            file: 71-assert.yaml
+        - apply:
+            file: 72-backup-storage.yaml
+        - patch:
+            file: 72-enable-backup.yaml
+        - apply:
+            file: 73-backup.yaml
+        - assert:
+            file: 73-assert.yaml
+
+    - name: restore
+      try:
+        # Lose the table, then bring it back from the backup.
+        - script:
+            content: |
+              set -e
+              echo "DROP DATABASE e2e;" | kubectl -n $NAMESPACE exec -i sql-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER"'
+        - apply:
+            file: 74-restore.yaml
+        - assert:
+            file: 74-assert.yaml
+        - script:
+            content: |
+              set -e
+              sql() { echo "$1" | kubectl -n $NAMESPACE exec -i sql-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s'; }
+              rows=$(sql "SELECT COUNT(*), SUM(id) FROM e2e.rows;")
+              echo "rows after restore: $rows"
+              [ "$rows" = "$(printf '1000\t500500')" ]
+              sql "ADMIN CHECK TABLE e2e.rows;"
 
     - name: delete-instance
       try:

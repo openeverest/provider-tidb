@@ -1,0 +1,14 @@
+# BR ran as the account the provider set up and wrote the snapshot to S3.
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+metadata:
+  name: e2e-backup
+status:
+  state: Succeeded
+---
+apiVersion: br.pingcap.com/v1alpha1
+kind: Backup
+metadata:
+  name: e2e-backup
+spec:
+  serviceAccount: openeverest-tidb-backup-manager

@@ -38,6 +38,17 @@ rules:
   - list
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - backup.openeverest.io
   resources:
   - backupclasses
@@ -83,6 +94,9 @@ rules:
   - restores/status
   verbs:
   - get
+  - list
+  - update
+  - watch
 - apiGroups:
   - cert-manager.io
   resources:
@@ -196,6 +210,18 @@ rules:
   verbs:
   - create
   - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  - roles
+  verbs:
+  - create
   - get
   - list
   - patch

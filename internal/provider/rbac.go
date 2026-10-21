@@ -44,10 +44,14 @@ package provider
 // +kubebuilder:rbac:groups=backup.openeverest.io,resources=restores/finalizers,verbs=update
 // TiDB Operator BR backups the provider creates from a Backup CR.
 // +kubebuilder:rbac:groups=br.pingcap.com,resources=backups,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=br.pingcap.com,resources=backups/status,verbs=get
+// +kubebuilder:rbac:groups=br.pingcap.com,resources=backups/status,verbs=get;list;watch;update
 // TiDB Operator BR restores the provider creates from a Restore CR.
 // +kubebuilder:rbac:groups=br.pingcap.com,resources=restores,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=br.pingcap.com,resources=restores/status,verbs=get
+// +kubebuilder:rbac:groups=br.pingcap.com,resources=restores/status,verbs=get;list;watch;update
+// The account BR jobs run as (see backup_rbac.go). The provider holds every
+// permission it grants there, so it needs no escalate or bind.
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch
 
 // Prometheus Operator PodMonitor the provider creates while monitoring is enabled.
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=get;list;watch;create;update;patch;delete

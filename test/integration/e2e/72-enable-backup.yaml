@@ -1,0 +1,10 @@
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  backup:
+    enabled: true
+    classRef: {name: br}
+    storages:
+      - storageRef: {name: s3-store}

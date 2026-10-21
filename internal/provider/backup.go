@@ -72,10 +72,15 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 		return controller.BackupExecutionStatus{}, fmt.Errorf("ensure BR credentials secret: %w", err)
 	}
 
+	if err := ensureBackupManagerRBAC(c, backup.Namespace); err != nil {
+		return controller.BackupExecutionStatus{}, err
+	}
+
 	brBackup := &tidbbrv1.Backup{
 		ObjectMeta: metav1.ObjectMeta{Name: backup.Name, Namespace: backup.Namespace},
 	}
 	if _, err := controllerutil.CreateOrUpdate(c.Context(), c.Client(), brBackup, func() error {
+		brBackup.Spec.ServiceAccount = backupManagerName
 		brBackup.Spec.Type = tidbbrv1.BackupTypeFull
 		brBackup.Spec.Mode = tidbbrv1.BackupModeSnapshot
 		brBackup.Spec.CleanPolicy = cleanPolicyFor(backup.Spec.DeletionPolicy)
@@ -199,10 +204,15 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 		return controller.RestoreExecutionStatus{}, fmt.Errorf("ensure BR credentials secret: %w", err)
 	}
 
+	if err := ensureBackupManagerRBAC(c, restore.Namespace); err != nil {
+		return controller.RestoreExecutionStatus{}, err
+	}
+
 	brRestore := &tidbbrv1.Restore{
 		ObjectMeta: metav1.ObjectMeta{Name: restore.Name, Namespace: restore.Namespace},
 	}
 	if _, err := controllerutil.CreateOrUpdate(c.Context(), c.Client(), brRestore, func() error {
+		brRestore.Spec.ServiceAccount = backupManagerName
 		brRestore.Spec.Type = tidbbrv1.BackupTypeFull
 		brRestore.Spec.Mode = tidbbrv1.RestoreModeSnapshot
 		brRestore.Spec.S3 = &tidbbrv1.S3StorageProvider{
