@@ -68,7 +68,7 @@ is covered under [Installation](#installation).
 | Capability | Status | Notes |
 |---|---|---|
 | Provisioning | ✅ | PD + TiKV + TiDB, optionally TiFlash |
-| Horizontal scaling | ✅ | Per-component `replicas` |
+| Horizontal scaling | ✅ | Per-component `replicas`; TiKV can't be scaled in below PD's `max-replicas` (see below) |
 | Vertical scaling (CPU / memory) | ✅ | Per-component `resources` |
 | Custom configuration | ✅ | Inline TOML `config` per component |
 | Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
@@ -95,6 +95,15 @@ See [ROADMAP.md](ROADMAP.md) for the planned work.
 > (`kubectl get storageclass <name> -o jsonpath='{.allowVolumeExpansion}'`). On a StorageClass
 > without it — e.g. the k3s/kind `local-path` default — the TiDB Operator leaves the volumes at their
 > old size. Volumes can never be shrunk; `Validate` rejects a smaller size.
+
+> [!IMPORTANT]
+> Scaling **TiKV** in takes the removed nodes offline first: the operator evicts their
+> leaders and PD moves their regions to the remaining nodes before the pods are deleted. PD keeps
+> `max-replicas` copies of every region (3 by default) and refuses to remove a node once fewer than
+> that would remain, so `Validate` rejects such a scale-in instead of leaving it stuck. The limit is
+> read from `[replication] max-replicas` in the PD `config` (as the `tidb-dev` preset sets it); PD
+> only applies that setting when the cluster is created. Creating or scaling out a smaller cluster
+> is still allowed.
 
 > [!IMPORTANT]
 > **TiFlash** runs while `spec.components.tiflash` is present with a replica count other than `0`

@@ -1,4 +1,6 @@
 # Instance the real TiDB Operator provisions, on the default version bundle.
+# A single-TiKV cluster keeps one copy of every region, which also lets the
+# scale-in step take TiKV back down to one node.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
@@ -15,6 +17,10 @@ spec:
       replicas: 1
       storage:
         size: 10Gi
+      parameters:
+        config: |
+          [replication]
+          max-replicas = 1
     tikv:
       type: tikv
       replicas: 1

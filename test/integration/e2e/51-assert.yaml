@@ -1,0 +1,10 @@
+# Both TiKV nodes are up on the new spec.
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiKVGroup
+metadata:
+  name: test-instance
+spec:
+  replicas: 2
+status:
+  replicas: 2
+  readyReplicas: 2

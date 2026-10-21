@@ -9,7 +9,8 @@ metadata:
 spec:
   description: |
     Create an Instance, wait for the operator to bring up PD/TiKV/TiDB pods,
-    run SELECT 1 with the connection-secret credentials, then delete.
+    run SELECT 1 with the connection-secret credentials, scale TiKV out and
+    back in without losing data, then delete.
 
   # Image pulls and first cluster bootstrap take minutes, not seconds.
   timeouts:
@@ -73,6 +74,60 @@ spec:
         - assert:
             timeout: 3m
             file: 30-assert.yaml
+
+    - name: tikv-scale-out
+      try:
+        - apply:
+            file: 50-sql-shell.yaml
+        - assert:
+            file: 50-assert.yaml
+        - patch:
+            file: 51-scale-out-tikv.yaml
+        - assert:
+            file: 51-assert.yaml
+        - assert:
+            file: ../core/11-assert.yaml
+        # Split a table into regions and wait until they sit on both TiKV nodes,
+        # so whichever node the scale-in removes holds some of its data.
+        - script:
+            timeout: 6m
+            content: |
+              set -e
+              sql() { echo "$1" | kubectl -n $NAMESPACE exec -i sql-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s'; }
+              sql "CREATE DATABASE e2e; CREATE TABLE e2e.rows (id INT PRIMARY KEY, v VARCHAR(64));"
+              sql "INSERT INTO e2e.rows WITH RECURSIVE s(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM s WHERE n < 1000) SELECT n, MD5(n) FROM s;"
+              sql "SPLIT TABLE e2e.rows BY (125), (250), (375), (500), (625), (750), (875);" >/dev/null
+              for i in $(seq 1 70); do
+                stores=$(sql "SELECT COUNT(DISTINCT p.STORE_ID) FROM information_schema.TIKV_REGION_PEERS p JOIN information_schema.TIKV_REGION_STATUS s ON p.REGION_ID = s.REGION_ID WHERE s.DB_NAME = 'e2e';")
+                echo "e2e.rows regions span $stores TiKV node(s)"
+                [ "$stores" = "2" ] && exit 0
+                sleep 5
+              done
+              exit 1
+
+    - name: tikv-scale-in
+      try:
+        # With one copy per region the leaders have nowhere to go, so the
+        # operator waits out its fixed 5-minute leader-eviction timeout before
+        # PD moves the regions and the store is removed.
+        - patch:
+            file: 60-scale-in-tikv.yaml
+        - assert:
+            file: 60-assert.yaml
+        - assert:
+            file: ../core/11-assert.yaml
+        # No row was lost, the table is consistent and PD has one store left.
+        - script:
+            content: |
+              set -e
+              sql() { echo "$1" | kubectl -n $NAMESPACE exec -i sql-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s'; }
+              rows=$(sql "SELECT COUNT(*), SUM(id) FROM e2e.rows;")
+              echo "rows: $rows"
+              [ "$rows" = "$(printf '1000\t500500')" ]
+              sql "ADMIN CHECK TABLE e2e.rows;"
+              up=$(sql "SELECT COUNT(*) FROM information_schema.TIKV_STORE_STATUS WHERE STORE_STATE_NAME = 'Up';")
+              echo "up stores: $up"
+              [ "$up" = "1" ]
 
     - name: delete-instance
       try:

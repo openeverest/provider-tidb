@@ -1,0 +1,34 @@
+# Long-running MySQL client the scale steps run their queries through, with the
+# credentials the provider published in <instance>-conn.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sql-shell
+  labels:
+    app.kubernetes.io/name: sql-client
+spec:
+  containers:
+    - name: mysql
+      image: mysql:8.4
+      command: ["sleep", "infinity"]
+      env:
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: test-instance-conn
+              key: host
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: test-instance-conn
+              key: port
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: test-instance-conn
+              key: username
+        - name: MYSQL_PWD
+          valueFrom:
+            secretKeyRef:
+              name: test-instance-conn
+              key: password

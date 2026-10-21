@@ -138,6 +138,45 @@ spec:
         - assert:
             file: 11-assert.yaml
 
+    - name: scale-out-tikv
+      try:
+        - patch:
+            file: 20-scale-out-tikv.yaml
+        - assert:
+            file: 20-assert.yaml
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch tikvgroup/test-instance --subresource status --type merge \
+                -p '{"status":{"replicas":4,"readyReplicas":4,"currentReplicas":4,"updatedReplicas":4}}'
+        - assert:
+            file: 11-assert.yaml
+
+    - name: scale-in-tikv
+      try:
+        - patch:
+            file: 21-scale-in-tikv.yaml
+        - assert:
+            file: 21-assert.yaml
+        # The operator takes the fourth store offline and removes it.
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch tikvgroup/test-instance --subresource status --type merge \
+                -p '{"status":{"replicas":3,"readyReplicas":3,"currentReplicas":3,"updatedReplicas":3}}'
+        - assert:
+            file: 11-assert.yaml
+
+    - name: scale-in-tikv-below-max-replicas-rejected
+      try:
+        - patch:
+            file: 22-scale-in-tikv-below-max-replicas.yaml
+        - assert:
+            file: 22-assert.yaml
+        # Reverting the request brings the Instance straight back.
+        - patch:
+            file: 21-scale-in-tikv.yaml
+        - assert:
+            file: 11-assert.yaml
+
     - name: enable-tiflash
       try:
         - patch:
