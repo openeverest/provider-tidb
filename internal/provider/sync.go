@@ -97,6 +97,10 @@ func SyncTiDB(c *controller.Context) error {
 		return err
 	}
 
+	if err := syncPodMonitor(c); err != nil {
+		return err
+	}
+
 	if err := reconcileDataSource(c); err != nil {
 		return err
 	}

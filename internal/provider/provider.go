@@ -10,6 +10,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	backupv1alpha1 "github.com/openeverest/openeverest/v2/api/backup/v1alpha1"
@@ -44,6 +46,7 @@ func New() *Provider {
 			SchemeFuncs: []func(*runtime.Scheme) error{
 				tidbcorev1.Install,
 				tidbbrv1.Install,
+				monitoringv1.AddToScheme,
 			},
 			WatchConfigs: []controller.WatchConfig{
 				controller.WatchOwned(&tidbcorev1.Cluster{}),

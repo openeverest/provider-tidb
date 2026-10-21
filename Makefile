@@ -12,6 +12,9 @@ OPENEVEREST_BRANCH ?= main
 # TiDB Operator (v2) version whose CRDs and image the provider targets.
 OPERATOR_VERSION ?= v2.0.1
 
+# Prometheus Operator version whose PodMonitor CRD the provider targets.
+PROMETHEUS_OPERATOR_VERSION ?= v0.94.1
+
 # Image URL to use for building/pushing image targets
 IMG ?= ghcr.io/openeverest/provider-tidb-dev:latest
 
@@ -200,6 +203,8 @@ install-crds: ## Install OpenEverest CRDs (and your operator's CRDs) into the cl
 	# TiDB Operator BR CRDs used by the backup provider.
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/br.pingcap.com_backups.yaml
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/br.pingcap.com_restores.yaml
+	# Prometheus Operator PodMonitor the provider creates while monitoring is enabled.
+	kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/$(PROMETHEUS_OPERATOR_VERSION)/example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml
 
 .PHONY: deploy-provider-ci
 deploy-provider-ci: helm-deps ## Deploy the provider via Helm for CI (IMG must already be imported into k3d).

@@ -1,0 +1,5 @@
+# Turning monitoring off removes the PodMonitor.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: test-instance-metrics

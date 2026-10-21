@@ -62,8 +62,10 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- with .Values.extraEnv }}
           env:
+            - name: POD_MONITOR_LABELS
+              value: {{ .Values.podMonitor.labels | default dict | toJson | quote }}
+          {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- with .Values.extraVolumeMounts }}

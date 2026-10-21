@@ -4,6 +4,27 @@
 package cluster
 
 // ClusterTopologyParameters defines topology-level parameters for the standard
-// distributed TiDB cluster. There are none for the MVP; per-component settings
-// are expressed through component specs.
-type ClusterTopologyParameters struct{}
+// distributed TiDB cluster. Per-component settings are expressed through
+// component specs.
+type ClusterTopologyParameters struct {
+	// Monitoring configures metrics collection.
+	Monitoring *Monitoring `json:"monitoring,omitempty"`
+}
+
+// Monitoring configures metrics collection for the instance.
+type Monitoring struct {
+	// Prometheus configures scraping by the Prometheus Operator.
+	Prometheus *Prometheus `json:"prometheus,omitempty"`
+}
+
+// Prometheus configures the PodMonitor that scrapes PD, TiKV, TiDB and TiFlash.
+type Prometheus struct {
+	// Enabled creates the PodMonitor; disabling it removes the PodMonitor.
+	Enabled bool `json:"enabled,omitempty"`
+	// Interval between scrapes, e.g. 30s. Defaults to the Prometheus global
+	// scrape interval.
+	Interval string `json:"interval,omitempty"`
+	// PodMonitorLabels are added to the PodMonitor so that the Prometheus
+	// podMonitorSelector picks it up (e.g. release: kube-prometheus-stack).
+	PodMonitorLabels map[string]string `json:"podMonitorLabels,omitempty"`
+}

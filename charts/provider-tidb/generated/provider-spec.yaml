@@ -111,6 +111,24 @@ spec:
                 storage: {}
               required:
                 - storage
+      parametersSchema:
+        openAPIV3Schema:
+          properties:
+            monitoring:
+              properties:
+                prometheus:
+                  properties:
+                    enabled:
+                      type: boolean
+                    interval:
+                      type: string
+                    podMonitorLabels:
+                      additionalProperties:
+                        type: string
+                      type: object
+                  type: object
+              type: object
+          type: object
   uiSchema:
     cluster:
       sections:
@@ -176,6 +194,18 @@ spec:
                 required: true
           description: Select the TiDB version for this cluster.
           label: Database Version
+        monitoring:
+          components:
+            prometheus:
+              fieldParams:
+                helperText: Creates a PodMonitor that scrapes PD, TiKV, TiDB and TiFlash. Requires the Prometheus Operator.
+                label: Prometheus
+              path: spec.topology.parameters.monitoring.prometheus.enabled
+              uiType: toggle
+          componentsOrder:
+            - prometheus
+          description: Collect TiDB metrics with Prometheus.
+          label: Monitoring
         pd:
           components:
             pdGroup:
@@ -454,6 +484,7 @@ spec:
         - tikv
         - tiflash
         - pd
+        - monitoring
         - advanced
   versions:
     - components:

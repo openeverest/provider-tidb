@@ -10,6 +10,9 @@
 # This file defines both the structural topology (config) and its UI rendering.
 
 config:
+  # parametersSchema references a Go type in definition/topologies/cluster
+  # for topology parameters (metrics collection).
+  parametersSchema: ClusterTopologyParameters
   components:
     tidb:
       defaults:
@@ -346,6 +349,18 @@ ui:
             - replicas
             - resources
             - storageClass
+    monitoring:
+      label: "Monitoring"
+      description: "Collect TiDB metrics with Prometheus."
+      components:
+        prometheus:
+          uiType: toggle
+          path: spec.topology.parameters.monitoring.prometheus.enabled
+          fieldParams:
+            label: "Prometheus"
+            helperText: "Creates a PodMonitor that scrapes PD, TiKV, TiDB and TiFlash. Requires the Prometheus Operator."
+      componentsOrder:
+        - prometheus
     advanced:
       label: "Advanced configuration"
       description: "Per-component configuration overrides."
@@ -393,4 +408,5 @@ ui:
     - tikv
     - tiflash
     - pd
+    - monitoring
     - advanced
