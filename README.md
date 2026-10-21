@@ -73,7 +73,7 @@ is covered under [Installation](#installation).
 | Custom configuration | ✅ | Inline TOML `config` per component |
 | Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
 | Version upgrades | ✅ | Change the version bundle; the operator rolls PD → TiFlash → TiKV → TiDB. Downgrades are rejected |
-| Monitoring | ❌ | Planned |
+| Monitoring | ✅ | Prometheus Operator `PodMonitor` for PD, TiKV, TiDB and TiFlash (see [Monitoring](#monitoring)) |
 | TLS | ❌ | Planned |
 
 Stateful components (PD, TiKV, TiFlash) additionally report:
@@ -251,6 +251,37 @@ Presets pin the default version bundle; a unit test fails if they fall behind it
 list itself
 live under `presets:` in [values.yaml](charts/provider-tidb/values.yaml); set `enabled: false`
 to hide one.
+
+### Monitoring
+
+PD, TiKV, TiDB and TiFlash serve Prometheus metrics natively, so no exporter is needed. Turning
+on **Monitoring → Prometheus** in the UI (`spec.topology.parameters.monitoring.prometheus`) makes
+the provider create a [Prometheus Operator](https://prometheus-operator.dev/) `PodMonitor` named
+`<instance>-metrics` that scrapes every component's `/metrics` endpoint:
+
+```yaml
+spec:
+  topology:
+    type: cluster
+    parameters:
+      monitoring:
+        prometheus:
+          enabled: true
+          interval: 30s                       # optional; defaults to Prometheus' global interval
+          podMonitorLabels:                   # optional; see below
+            release: kube-prometheus-stack
+```
+
+The `PodMonitor` is owned by the Instance and removed when monitoring is turned off. It carries
+the `app.kubernetes.io/managed-by: everest` and `app.kubernetes.io/instance: <instance>` labels
+the [Metrics plugin](https://github.com/openeverest/plugin-metrics) finds it by, so its *Metrics*
+tab shows the built-in TiDB dashboard.
+
+Prometheus only scrapes the `PodMonitor`s its `podMonitorSelector` matches; kube-prometheus-stack,
+for example, selects `release: <its release name>` by default. Set those labels once for every
+Instance with the chart's `podMonitor.labels`, or per Instance with `podMonitorLabels` (which wins
+on conflicts). Validation rejects turning monitoring on while the `PodMonitor` CRD is not
+installed.
 
 ## Topologies
 
