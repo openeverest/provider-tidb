@@ -78,6 +78,11 @@ func SyncTiDB(c *controller.Context) error {
 		return fmt.Errorf("get cluster for ownership: %w", err)
 	}
 
+	// The pods mount the certificates, so they must exist before the groups.
+	if err := ensureTLSSecrets(c, owner); err != nil {
+		return err
+	}
+
 	pd := comps[common.ComponentPD]
 	if err := applyOwnedByCluster(c, owner, buildPDGroup(c, pd, resolveImage(providerSpec, common.ComponentPD, pd))); err != nil {
 		return err
@@ -316,15 +321,27 @@ func buildCluster(c *controller.Context) (*tidbcorev1.Cluster, error) {
 	}
 	// bootstrapSQL is immutable after creation: set it only for a new Cluster,
 	// otherwise echo back the value the Cluster was created with.
+	// tlsCluster is immutable too: echo it back as well.
 	existing := &tidbcorev1.Cluster{}
 	err := c.Get(existing, c.Name())
 	switch {
 	case apierrors.IsNotFound(err):
 		cluster.Spec.BootstrapSQL = &corev1.LocalObjectReference{Name: bootstrapConfigMapName(c.Name())}
+		settings := tlsSettings(c)
+		if settings.Cluster {
+			cluster.Spec.TLSCluster = &tidbcorev1.TLSCluster{Enabled: true}
+		}
+		if source := tlsSource(settings); source != "" {
+			cluster.Annotations = map[string]string{tlsSourceAnnotation: source}
+		}
 	case err != nil:
 		return nil, err
 	default:
 		cluster.Spec.BootstrapSQL = existing.Spec.BootstrapSQL
+		cluster.Spec.TLSCluster = existing.Spec.TLSCluster
+		if source := existing.Annotations[tlsSourceAnnotation]; source != "" {
+			cluster.Annotations = map[string]string{tlsSourceAnnotation: source}
+		}
 	}
 	return cluster, nil
 }
@@ -387,6 +404,9 @@ func buildTiDBGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, imag
 	}
 	if cfg := componentConfig(c, comp); cfg != "" {
 		tmpl.Config = tidbcorev1.ConfigFile(cfg)
+	}
+	if tlsSettings(c).Client {
+		tmpl.Security = &tidbcorev1.TiDBSecurity{TLS: &tidbcorev1.TiDBTLS{MySQL: &tidbcorev1.TLS{Enabled: true}}}
 	}
 	return &tidbcorev1.TiDBGroup{
 		ObjectMeta: c.ObjectMeta(c.Name()),

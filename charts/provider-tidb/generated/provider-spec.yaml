@@ -139,6 +139,25 @@ spec:
                       type: object
                   type: object
               type: object
+            tls:
+              properties:
+                certManager:
+                  properties:
+                    enabled:
+                      type: boolean
+                    issuerRef:
+                      properties:
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                      type: object
+                  type: object
+                client:
+                  type: boolean
+                cluster:
+                  type: boolean
+              type: object
           type: object
   uiSchema:
     cluster:
@@ -303,6 +322,69 @@ spec:
               uiType: group
           description: Metadata, timestamp and scheduling nodes. Use an odd number for quorum.
           label: Placement Driver (PD)
+        security:
+          components:
+            certManager:
+              fieldParams:
+                defaultValue: false
+                helperText: cert-manager issues the certificates instead of the provider. Requires cert-manager in the cluster.
+                label: Issue certificates with cert-manager
+                modes:
+                  edit:
+                    disabled: true
+              path: spec.topology.parameters.tls.certManager.enabled
+              uiType: toggle
+            clientTLS:
+              fieldParams:
+                defaultValue: true
+                helperText: MySQL clients can connect to TiDB over TLS and verify it with the CA in the connection secret.
+                label: Encrypt client connections (TLS)
+                modes:
+                  edit:
+                    disabled: true
+              path: spec.topology.parameters.tls.client
+              uiType: toggle
+            clusterTLS:
+              fieldParams:
+                defaultValue: true
+                helperText: PD, TiKV, TiDB and TiFlash authenticate each other with certificates and encrypt their traffic.
+                label: Encrypt traffic between components (mTLS)
+                modes:
+                  edit:
+                    disabled: true
+              path: spec.topology.parameters.tls.cluster
+              uiType: toggle
+            issuerKind:
+              fieldParams:
+                defaultValue: Issuer
+                label: Issuer kind
+                modes:
+                  edit:
+                    disabled: true
+                options:
+                  - label: Issuer
+                    value: Issuer
+                  - label: ClusterIssuer
+                    value: ClusterIssuer
+              path: spec.topology.parameters.tls.certManager.issuerRef.kind
+              uiType: select
+            issuerName:
+              fieldParams:
+                helperText: An Issuer in this namespace or a ClusterIssuer that signs the certificates and provides the CA (ca.crt). Leave empty for a CA cert-manager creates for this cluster.
+                label: cert-manager issuer (optional)
+                modes:
+                  edit:
+                    disabled: true
+              path: spec.topology.parameters.tls.certManager.issuerRef.name
+              uiType: text
+          componentsOrder:
+            - clusterTLS
+            - clientTLS
+            - certManager
+            - issuerName
+            - issuerKind
+          description: Encrypt traffic with certificates the provider issues for this cluster. Can only be chosen when the cluster is created.
+          label: Security
         tidb:
           components:
             tidbGroup:
@@ -502,6 +584,7 @@ spec:
         - tikv
         - tiflash
         - pd
+        - security
         - monitoring
         - advanced
   versions:

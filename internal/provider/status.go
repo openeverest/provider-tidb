@@ -264,7 +264,7 @@ func isStuckContainer(message string) bool {
 // connectionDetails points at the TiDB internal (SQL) service, which the
 // operator names "<group>-tidb" and exposes on the MySQL client port.
 func connectionDetails(c *controller.Context) controller.ConnectionDetails {
-	return controller.ConnectionDetails{
+	details := controller.ConnectionDetails{
 		Type:     "mysql",
 		Provider: common.ProviderName,
 		Host:     fmt.Sprintf("%s-tidb.%s", c.Name(), c.Namespace()),
@@ -272,4 +272,12 @@ func connectionDetails(c *controller.Context) controller.ConnectionDetails {
 		Username: rootUser,
 		Password: readRootPassword(c),
 	}
+	// With client TLS the host is in TiDB's certificate, so clients can verify
+	// it against the CA (e.g. mysql --ssl-mode=VERIFY_IDENTITY --ssl-ca=ca.crt).
+	if tlsSettings(c).Client {
+		if ca, err := readClientCA(c); err == nil && len(ca) > 0 {
+			details.AdditionalProperties = map[string]string{tlsKeyCA: string(ca)}
+		}
+	}
+	return details
 }

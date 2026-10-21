@@ -18,6 +18,9 @@ PROMETHEUS_OPERATOR_VERSION ?= v0.94.1
 # VictoriaMetrics Operator version whose VMPodScrape CRD the provider targets.
 VM_OPERATOR_VERSION ?= v0.66.1
 
+# cert-manager version whose CRDs the provider targets for tls.certManager.
+CERT_MANAGER_VERSION ?= v1.20.2
+
 # Image URL to use for building/pushing image targets
 IMG ?= ghcr.io/openeverest/provider-tidb-dev:latest
 
@@ -214,6 +217,9 @@ install-crds: yq ## Install OpenEverest CRDs (and your operator's CRDs) into the
 		curl -fsSL https://raw.githubusercontent.com/VictoriaMetrics/operator/$(VM_OPERATOR_VERSION)/config/crd/overlay/crd.yaml \
 		| $(YQ) 'select(.metadata.name == "vmpodscrapes.operator.victoriametrics.com")' \
 		| kubectl apply --server-side -f -
+	# cert-manager CRDs for tls.certManager; clusters running cert-manager already have them.
+	kubectl get crd certificates.cert-manager.io >/dev/null 2>&1 || \
+		kubectl apply --server-side -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.crds.yaml
 
 .PHONY: deploy-provider-ci
 deploy-provider-ci: helm-deps ## Deploy the provider via Helm for CI (IMG must already be imported into k3d).

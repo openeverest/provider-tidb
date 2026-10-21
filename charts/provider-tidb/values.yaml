@@ -169,6 +169,8 @@ presets:
       version: "8.5.2"
       topology:
         type: cluster
+        parameters:
+          tls: {cluster: true, client: true}
       components:
         pd:
           type: pd
@@ -203,6 +205,8 @@ presets:
       version: "8.5.2"
       topology:
         type: cluster
+        parameters:
+          tls: {cluster: true, client: true}
       components:
         pd:
           type: pd
@@ -233,6 +237,8 @@ presets:
       version: "8.5.2"
       topology:
         type: cluster
+        parameters:
+          tls: {cluster: true, client: true}
       components:
         pd:
           type: pd

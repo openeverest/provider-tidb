@@ -74,7 +74,7 @@ is covered under [Installation](#installation).
 | Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
 | Version upgrades | ✅ | Change the version bundle; the operator rolls PD → TiFlash → TiKV → TiDB. Downgrades are rejected |
 | Monitoring | ✅ | Prometheus `PodMonitor` or VictoriaMetrics `VMPodScrape` for PD, TiKV, TiDB and TiFlash (see [Monitoring](#monitoring)) |
-| TLS | ❌ | Planned |
+| TLS | ✅ | mTLS between components and TLS for MySQL clients, with provider-issued certificates (see [Security](#security)) |
 
 Stateful components (PD, TiKV, TiFlash) additionally report:
 
@@ -299,6 +299,81 @@ with `podMonitorLabels` / `podScrapeLabels` (which win on conflicts).
 > VictoriaMetrics Operator does convert Prometheus Operator objects, it also turns the
 > `PodMonitor` into a `VMPodScrape` named `<instance>-metrics`, so with both toggles on a
 > `VMAgent` scrapes every component twice.
+
+### Security
+
+New Instances encrypt their traffic by default. The **Security** section of the UI
+(`spec.topology.parameters.tls`) has two toggles, both on by default:
+
+| Toggle | Field | Effect |
+|---|---|---|
+| Encrypt traffic between components (mTLS) | `tls.cluster` | PD, TiKV, TiDB and TiFlash authenticate each other with certificates and encrypt their traffic |
+| Encrypt client connections (TLS) | `tls.client` | MySQL clients can connect to TiDB over TLS |
+
+```yaml
+spec:
+  topology:
+    type: cluster
+    parameters:
+      tls:
+        cluster: true
+        client: true
+```
+
+Both are chosen when the Instance is created and cannot be changed afterwards: TiDB Operator
+does not switch an existing cluster between plaintext and TLS. An Instance without the field
+(for example one created before this setting existed) stays plaintext.
+
+The provider generates a CA for each Instance (`<instance>-tls-ca`) and issues every
+certificate from it into the Secrets the operator mounts: `<instance>-{pd,tikv,tidb,tiflash}-cluster-secret`,
+`<instance>-cluster-client-secret` (used by the operator and by BR backups) and
+`<instance>-tidb-server-secret` (TiDB's MySQL certificate). They are deleted with the Instance.
+
+With client TLS, the connection Secret `<instance>-conn` carries the CA as `ca.crt`, and the
+published host is in TiDB's certificate, so clients can verify both:
+
+```bash
+kubectl get secret <instance>-conn -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
+mysql -h <host> -P 4000 -u root -p --ssl-mode=VERIFY_IDENTITY --ssl-ca=ca.crt
+```
+
+TiDB still accepts plaintext connections unless you require TLS, e.g. with
+`ALTER USER ... REQUIRE SSL` or by setting `require_secure_transport`.
+
+With mTLS, the [monitoring](#monitoring) `PodMonitor` and `VMPodScrape` scrape over https
+with the cluster client certificate.
+
+> [!NOTE]
+> The certificates are valid for ten years and are not rotated yet: TiDB Operator does not
+> reload its own client certificate, and TiDB only picks up a new MySQL certificate after
+> `ALTER INSTANCE RELOAD TLS`.
+
+#### Certificates from cert-manager
+
+With [cert-manager](https://cert-manager.io/) installed, the certificates can come from it
+instead (**Issue certificates with cert-manager** in the UI):
+
+```yaml
+      tls:
+        cluster: true
+        client: true
+        certManager:
+          enabled: true
+          issuerRef:                # optional
+            name: corp-ca
+            kind: ClusterIssuer     # or Issuer (default), in the Instance's namespace
+```
+
+- Without `issuerRef`, the provider sets up a CA in cert-manager for the Instance: a
+  self-signed `Issuer`, a CA `Certificate` (`<instance>-tls-ca`) and a CA `Issuer` that signs the rest.
+- With `issuerRef`, your issuer signs every certificate. It must write the CA into the Secrets
+  (`ca.crt`), as CA and Vault issuers do; ACME issuers cannot be used.
+
+The provider creates one `Certificate` per Secret listed above, valid for ten years, and makes
+each Secret cert-manager writes owned by its `Certificate`, so they are deleted with the Instance.
+The certificate source is chosen at creation, like the toggles. If your issuer caps certificates
+at a shorter lifetime, cert-manager renews them earlier; restart TiDB Operator after a renewal
+and run `ALTER INSTANCE RELOAD TLS` on each TiDB to pick up the new certificates.
 
 ## Topologies
 

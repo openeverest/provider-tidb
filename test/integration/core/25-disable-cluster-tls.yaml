@@ -1,0 +1,10 @@
+# TLS between components can only be chosen when the Instance is created.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  topology:
+    parameters:
+      tls:
+        cluster: false

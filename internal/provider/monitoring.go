@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"strings"
 
 	vmv1beta1 "github.com/VictoriaMetrics/operator/api/operator/v1beta1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"github.com/prometheus/common/model"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -43,21 +43,41 @@ const (
 
 // metricsEndpoint is a component port serving native Prometheus metrics. PD
 // serves them on the port TiKV names for gRPC ("client"), so every endpoint
-// keeps only the pods of its own components.
+// keeps only the pods of its own component.
 type metricsEndpoint struct {
-	port       string
-	components []string
+	port      string
+	component string
 }
 
 var metricsEndpoints = []metricsEndpoint{
-	{tidbcorev1.PDPortNameClient, []string{common.ComponentPD}},
-	{tidbcorev1.TiKVPortNameStatus, []string{common.ComponentTiKV, common.ComponentTiDB}},
-	{tidbcorev1.TiFlashPortNameMetrics, []string{common.ComponentTiFlash}},
-	{tidbcorev1.TiFlashPortNameProxyStatus, []string{common.ComponentTiFlash}},
+	{tidbcorev1.PDPortNameClient, common.ComponentPD},
+	{tidbcorev1.TiKVPortNameStatus, common.ComponentTiKV},
+	{tidbcorev1.TiDBPortNameStatus, common.ComponentTiDB},
+	{tidbcorev1.TiFlashPortNameMetrics, common.ComponentTiFlash},
+	{tidbcorev1.TiFlashPortNameProxyStatus, common.ComponentTiFlash},
 }
 
-func (e metricsEndpoint) keepRegex() string {
-	return strings.Join(e.components, "|")
+// metricsTLS is how a scrape reaches the metrics endpoints of a cluster with
+// mTLS between components: over https, presenting the cluster client
+// certificate and verifying each component by its service name, which every
+// component certificate carries.
+type metricsTLS struct {
+	secret string
+}
+
+func clusterMetricsTLS(c *controller.Context) *metricsTLS {
+	if !tlsSettings(c).Cluster {
+		return nil
+	}
+	return &metricsTLS{secret: clusterClientTLSSecretName(c.Name())}
+}
+
+func (t *metricsTLS) key(key string) *corev1.SecretKeySelector {
+	return &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: t.secret}, Key: key}
+}
+
+func componentServerName(instance, component string) string {
+	return instance + "-" + component
 }
 
 // scraper is one monitoring system the provider can create a scrape object for.
@@ -249,18 +269,29 @@ func instancePodSelector(c *controller.Context) metav1.LabelSelector {
 }
 
 func buildPodMonitor(c *controller.Context, settings scrapeSettings, defaults map[string]string) client.Object {
+	tls := clusterMetricsTLS(c)
 	endpoints := make([]monitoringv1.PodMetricsEndpoint, 0, len(metricsEndpoints))
 	for _, e := range metricsEndpoints {
-		endpoints = append(endpoints, monitoringv1.PodMetricsEndpoint{
+		endpoint := monitoringv1.PodMetricsEndpoint{
 			Port:     ptr.To(e.port),
 			Path:     metricsPath,
 			Interval: monitoringv1.Duration(settings.interval),
 			RelabelConfigs: []monitoringv1.RelabelConfig{{
 				Action:       "keep",
 				SourceLabels: []monitoringv1.LabelName{componentPodLabelMeta},
-				Regex:        e.keepRegex(),
+				Regex:        e.component,
 			}},
-		})
+		}
+		if tls != nil {
+			endpoint.Scheme = ptr.To(monitoringv1.Scheme("https"))
+			endpoint.TLSConfig = &monitoringv1.SafeTLSConfig{
+				CA:         monitoringv1.SecretOrConfigMap{Secret: tls.key(tlsKeyCA)},
+				Cert:       monitoringv1.SecretOrConfigMap{Secret: tls.key(tlsKeyCert)},
+				KeySecret:  tls.key(tlsKeyKey),
+				ServerName: ptr.To(componentServerName(c.Name(), e.component)),
+			}
+		}
+		endpoints = append(endpoints, endpoint)
 	}
 	return &monitoringv1.PodMonitor{
 		ObjectMeta: scrapeObjectMeta(c, podMonitorName(c.Name()), defaults, settings.labels),
@@ -273,9 +304,10 @@ func buildPodMonitor(c *controller.Context, settings scrapeSettings, defaults ma
 }
 
 func buildVMPodScrape(c *controller.Context, settings scrapeSettings, defaults map[string]string) client.Object {
+	tls := clusterMetricsTLS(c)
 	endpoints := make([]vmv1beta1.PodMetricsEndpoint, 0, len(metricsEndpoints))
 	for _, e := range metricsEndpoints {
-		endpoints = append(endpoints, vmv1beta1.PodMetricsEndpoint{
+		endpoint := vmv1beta1.PodMetricsEndpoint{
 			Port: ptr.To(e.port),
 			EndpointScrapeParams: vmv1beta1.EndpointScrapeParams{
 				Path:     metricsPath,
@@ -285,10 +317,20 @@ func buildVMPodScrape(c *controller.Context, settings scrapeSettings, defaults m
 				RelabelConfigs: []*vmv1beta1.RelabelConfig{{
 					Action:       "keep",
 					SourceLabels: []string{componentPodLabelMeta},
-					Regex:        vmv1beta1.StringOrArray{e.keepRegex()},
+					Regex:        vmv1beta1.StringOrArray{e.component},
 				}},
 			},
-		})
+		}
+		if tls != nil {
+			endpoint.Scheme = "https"
+			endpoint.TLSConfig = &vmv1beta1.TLSConfig{
+				CA:         vmv1beta1.SecretOrConfigMap{Secret: tls.key(tlsKeyCA)},
+				Cert:       vmv1beta1.SecretOrConfigMap{Secret: tls.key(tlsKeyCert)},
+				KeySecret:  tls.key(tlsKeyKey),
+				ServerName: componentServerName(c.Name(), e.component),
+			}
+		}
+		endpoints = append(endpoints, endpoint)
 	}
 	return &vmv1beta1.VMPodScrape{
 		ObjectMeta: scrapeObjectMeta(c, vmPodScrapeName(c.Name()), defaults, settings.labels),

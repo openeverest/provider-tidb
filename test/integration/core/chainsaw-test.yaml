@@ -60,6 +60,9 @@ spec:
               pw=$(kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath='{.data.password}' | base64 -d)
               test -n "$pw" || { echo "connection secret has empty password"; exit 1; }
               echo "connection secret password length: ${#pw}"
+              # With client TLS the connection secret carries the CA to verify TiDB with.
+              kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath='{.data.ca\.crt}' | base64 -d | grep -q "BEGIN CERTIFICATE" \
+                || { echo "connection secret has no CA"; exit 1; }
 
     - name: rollout-reports-updating
       try:
@@ -195,6 +198,18 @@ spec:
         - assert:
             file: 11-assert.yaml
 
+    - name: changing-tls-rejected
+      try:
+        - patch:
+            file: 25-disable-cluster-tls.yaml
+        - assert:
+            file: 25-assert.yaml
+        # Asking for the original setting again brings the Instance back.
+        - patch:
+            file: 25-restore-cluster-tls.yaml
+        - assert:
+            file: 11-assert.yaml
+
     - name: enable-tiflash
       try:
         - patch:
@@ -233,6 +248,24 @@ spec:
         # The group keeps the expanded size.
         - assert:
             file: 13-assert.yaml
+
+    - name: cert-manager-certificates
+      try:
+        - apply:
+            file: 30-create-cm-instance.yaml
+        - assert:
+            file: 30-assert.yaml
+        - delete:
+            ref:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              name: cm-instance
+        - wait:
+            apiVersion: core.openeverest.io/v1alpha1
+            kind: Instance
+            name: cm-instance
+            for:
+              deletion: {}
 
     - name: delete-instance
       try:
