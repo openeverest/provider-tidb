@@ -1,7 +1,8 @@
 ---
 # Core lifecycle suite: create an Instance, verify the provider produces the
 # TiDB Operator v2 CRs, simulate the operator marking the groups ready, verify
-# the Instance reports Ready, then delete.
+# the Instance reports Ready, exercise the update paths (scale, CPU/memory,
+# version bundle, TiFlash, storage), then delete.
 #
 # The TiDB operator itself is NOT deployed here — the provider is exercised in
 # isolation and group readiness is simulated by patching group status.
@@ -11,7 +12,7 @@ metadata:
   name: core
 spec:
   description: |
-    Lifecycle of an Instance: create, simulate operator readiness, and delete.
+    Lifecycle of an Instance: create, simulate operator readiness, update, and delete.
 
   catch:
     - script:
@@ -47,7 +48,7 @@ spec:
               set -e
               for g in pdgroup tikvgroup tidbgroup; do
                 kubectl -n $NAMESPACE patch $g/test-instance --subresource status --type merge \
-                  -p '{"status":{"version":"v8.5.2","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=test-instance"}}'
+                  -p '{"status":{"version":"v7.5.5","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=test-instance"}}'
               done
         - assert:
             file: 11-assert.yaml
@@ -75,6 +76,65 @@ spec:
             content: |
               kubectl -n $NAMESPACE patch tikvgroup/test-instance --subresource status --type merge \
                 -p '{"status":{"updateRevision":"rev-2","currentRevision":"rev-2","updatedReplicas":1}}'
+        - assert:
+            file: 11-assert.yaml
+
+    - name: scale-tidb
+      try:
+        - patch:
+            file: 17-scale-tidb.yaml
+        - assert:
+            file: 17-assert.yaml
+        # The operator brings the second TiDB instance up.
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch tidbgroup/test-instance --subresource status --type merge \
+                -p '{"status":{"replicas":2,"readyReplicas":2,"currentReplicas":2,"updatedReplicas":2}}'
+        - assert:
+            file: 11-assert.yaml
+
+    - name: resize-compute
+      try:
+        - patch:
+            file: 18-resize-compute.yaml
+        - assert:
+            file: 18-assert.yaml
+        # New resources change every group's pod template, so the operator starts
+        # a new revision per group and rolls its instances onto it.
+        - script:
+            content: |
+              set -e
+              for g in pdgroup tikvgroup tidbgroup; do
+                kubectl -n $NAMESPACE patch $g/test-instance --subresource status --type merge \
+                  -p '{"status":{"updateRevision":"rev-resize","updatedReplicas":0}}'
+              done
+        - assert:
+            file: 12-assert.yaml
+        - script:
+            content: |
+              set -e
+              for g in pdgroup tikvgroup tidbgroup; do
+                r=$(kubectl -n $NAMESPACE get $g/test-instance -o jsonpath='{.spec.replicas}')
+                kubectl -n $NAMESPACE patch $g/test-instance --subresource status --type merge \
+                  -p "{\"status\":{\"currentRevision\":\"rev-resize\",\"updatedReplicas\":$r}}"
+              done
+        - assert:
+            file: 11-assert.yaml
+
+    - name: upgrade-version
+      try:
+        - patch:
+            file: 19-upgrade-version.yaml
+        - assert:
+            file: 19-assert.yaml
+        # The operator finishes upgrading every group to the new version.
+        - script:
+            content: |
+              set -e
+              for g in pdgroup tikvgroup tidbgroup; do
+                kubectl -n $NAMESPACE patch $g/test-instance --subresource status --type merge \
+                  -p '{"status":{"version":"v8.5.2"}}'
+              done
         - assert:
             file: 11-assert.yaml
 

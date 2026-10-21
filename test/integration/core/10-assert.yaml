@@ -19,7 +19,7 @@ spec:
   replicas: 1
   template:
     spec:
-      version: v8.5.2
+      version: v7.5.5
       overlay:
         pod:
           metadata:
@@ -41,7 +41,7 @@ spec:
   replicas: 1
   template:
     spec:
-      version: v8.5.2
+      version: v7.5.5
       overlay:
         pod:
           metadata:
@@ -63,7 +63,7 @@ spec:
   replicas: 1
   template:
     spec:
-      version: v8.5.2
+      version: v7.5.5
       overlay:
         pod:
           metadata:

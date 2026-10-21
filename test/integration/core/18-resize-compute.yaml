@@ -1,0 +1,22 @@
+# Changing CPU and memory of every component on a running Instance.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  components:
+    pd:
+      resources:
+        limits:
+          cpu: 500m
+          memory: 1Gi
+    tikv:
+      resources:
+        limits:
+          cpu: "1"
+          memory: 2Gi
+    tidb:
+      resources:
+        limits:
+          cpu: 750m
+          memory: 1536Mi

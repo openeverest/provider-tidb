@@ -57,7 +57,7 @@ spec:
     - name: create-instance
       try:
         - apply:
-            file: ../core/10-create-instance.yaml
+            file: 10-create-instance.yaml
 
     - name: cluster-ready
       try:
