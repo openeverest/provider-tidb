@@ -144,7 +144,9 @@ Ordered by value/effort; each phase is independently shippable.
 - **Monitoring:** Prometheus Operator `PodMonitor` or VictoriaMetrics `VMPodScrape` for every
   component; the Metrics plugin's TiDB dashboard reads the Prometheus one (done). Referencing a `MonitoringConfig` waits on the Instance API
   offering a field for it.
-- **TLS:** cluster-internal mTLS (`Cluster.spec.tlsCluster`), client TLS for TiDB (MySQL).
+- **TLS:** cluster-internal mTLS (`Cluster.spec.tlsCluster`) and client TLS for TiDB (MySQL),
+  with provider-issued certificates, on by default in the UI (done). Next: cert-manager as an
+  alternative certificate source, and certificate rotation.
 - **Security Enhanced Mode**, auth-token config surfacing where appropriate.
 
 ### Phase 5 — Advanced topologies & tuning
