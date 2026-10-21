@@ -78,25 +78,25 @@ spec:
       relabelConfigs:
         - action: keep
           sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: ["pd"]
+          regex: pd
     - port: status
       path: /metrics
       interval: 1m
       relabelConfigs:
         - action: keep
           sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: ["tikv|tidb"]
+          regex: tikv|tidb
     - port: metrics
       path: /metrics
       interval: 1m
       relabelConfigs:
         - action: keep
           sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: ["tiflash"]
+          regex: tiflash
     - port: proxy-metrics
       path: /metrics
       interval: 1m
       relabelConfigs:
         - action: keep
           sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: ["tiflash"]
+          regex: tiflash
