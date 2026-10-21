@@ -72,7 +72,7 @@ is covered under [Installation](#installation).
 | Vertical scaling (CPU / memory) | ✅ | Per-component `resources` |
 | Custom configuration | ✅ | Inline TOML `config` per component |
 | Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
-| Version upgrades | ❌ | Planned — ordered rolling upgrade |
+| Version upgrades | ✅ | Change the version bundle; the operator rolls PD → TiFlash → TiKV → TiDB. Downgrades are rejected |
 | Monitoring | ❌ | Planned |
 | TLS | ❌ | Planned |
 
