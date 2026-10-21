@@ -178,15 +178,26 @@ func TestCertManagerSecretsAreAdopted(t *testing.T) {
 		Type:       corev1.SecretTypeTLS,
 		Data:       map[string][]byte{"ca.crt": []byte("ca"), "tls.crt": []byte("cert"), "tls.key": []byte("key")},
 	}
+	// The fake client's server-side apply assigns no UID; start from a
+	// Certificate that already exists, as it does once cert-manager wrote it.
+	existing := &cmapi.Certificate{ObjectMeta: metav1.ObjectMeta{Name: "orders-tidb-server-secret", Namespace: testNamespace, UID: "cert-uid"}}
 	params := certManagerTopology(false, true, &cluster.CertManager{IssuerRef: &cluster.IssuerRef{Name: "corp-ca"}})
-	c, cl := certManagerContext(t, params, true, issued)
+	c, cl := certManagerContext(t, params, true, issued, existing)
 	if err := ensureTLSSecrets(c, testCluster()); err != nil {
 		t.Fatal(err)
 	}
 
+	cert := &cmapi.Certificate{}
+	if err := cl.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "orders-tidb-server-secret"}, cert); err != nil {
+		t.Fatal(err)
+	}
+	if cert.UID != "cert-uid" {
+		t.Fatalf("certificate UID = %q, want the existing one", cert.UID)
+	}
 	secret := mustSecret(t, cl, "orders-tidb-server-secret")
-	if len(secret.OwnerReferences) != 1 || secret.OwnerReferences[0].Kind != "Cluster" || secret.OwnerReferences[0].UID != "cluster-uid" {
-		t.Errorf("owner references = %+v, want the Cluster", secret.OwnerReferences)
+	if len(secret.OwnerReferences) != 1 || secret.OwnerReferences[0].Kind != "Certificate" ||
+		secret.OwnerReferences[0].Name != cert.Name || secret.OwnerReferences[0].UID != cert.UID {
+		t.Errorf("owner references = %+v, want the Certificate %s (%s)", secret.OwnerReferences, cert.Name, cert.UID)
 	}
 	if c := secret.OwnerReferences[0].Controller; c != nil && *c {
 		t.Error("adopted as controller; cert-manager may need that")

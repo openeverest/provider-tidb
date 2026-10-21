@@ -348,6 +348,33 @@ with the cluster client certificate.
 > reload its own client certificate, and TiDB only picks up a new MySQL certificate after
 > `ALTER INSTANCE RELOAD TLS`.
 
+#### Certificates from cert-manager
+
+With [cert-manager](https://cert-manager.io/) installed, the certificates can come from it
+instead (**Issue certificates with cert-manager** in the UI):
+
+```yaml
+      tls:
+        cluster: true
+        client: true
+        certManager:
+          enabled: true
+          issuerRef:                # optional
+            name: corp-ca
+            kind: ClusterIssuer     # or Issuer (default), in the Instance's namespace
+```
+
+- Without `issuerRef`, the provider sets up a CA in cert-manager for the Instance: a
+  self-signed `Issuer`, a CA `Certificate` (`<instance>-tls-ca`) and a CA `Issuer` that signs the rest.
+- With `issuerRef`, your issuer signs every certificate. It must write the CA into the Secrets
+  (`ca.crt`), as CA and Vault issuers do; ACME issuers cannot be used.
+
+The provider creates one `Certificate` per Secret listed above, valid for ten years, and makes
+each Secret cert-manager writes owned by its `Certificate`, so they are deleted with the Instance.
+The certificate source is chosen at creation, like the toggles. If your issuer caps certificates
+at a shorter lifetime, cert-manager renews them earlier; restart TiDB Operator after a renewal
+and run `ALTER INSTANCE RELOAD TLS` on each TiDB to pick up the new certificates.
+
 ## Topologies
 
 | Topology | Default | Description |

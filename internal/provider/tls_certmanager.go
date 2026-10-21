@@ -117,7 +117,7 @@ func ensureCertManagerCertificates(c *controller.Context, owner *tidbcorev1.Clus
 		if err := applyOwnedByCluster(c, owner, buildCertificate(c, leaf, issuer)); err != nil {
 			return fmt.Errorf("apply certificate %q: %w", leaf.secretName, err)
 		}
-		if err := adoptSecret(c, owner, leaf.secretName); err != nil {
+		if err := adoptSecret(c, leaf.secretName); err != nil {
 			return err
 		}
 	}
@@ -155,7 +155,7 @@ func ensureCertManagerIssuer(c *controller.Context, owner *tidbcorev1.Cluster, r
 	if err := applyOwnedByCluster(c, owner, ca); err != nil {
 		return cmmeta.IssuerReference{}, fmt.Errorf("apply CA certificate: %w", err)
 	}
-	if err := adoptSecret(c, owner, tlsCASecretName(c.Name())); err != nil {
+	if err := adoptSecret(c, tlsCASecretName(c.Name())); err != nil {
 		return cmmeta.IssuerReference{}, err
 	}
 	caIssuer := &cmapi.Issuer{
@@ -200,12 +200,20 @@ func buildCertificate(c *controller.Context, leaf leafCert, issuer cmmeta.Issuer
 	return cert
 }
 
-// adoptSecret adds the Cluster as an owner of a Secret cert-manager wrote, so
-// it is deleted with the Instance. cert-manager does not own its Secrets
-// unless started with --enable-certificate-owner-ref.
-func adoptSecret(c *controller.Context, owner *tidbcorev1.Cluster, name string) error {
+// adoptSecret makes the Secret cert-manager wrote for a Certificate (both named
+// alike) owned by that Certificate, so it is deleted with it. cert-manager does
+// not own its Secrets unless started with --enable-certificate-owner-ref. The
+// Certificate, not the Cluster: it is owned by the Cluster and so outlives the
+// pods during teardown, and once it is gone cert-manager cannot write the
+// Secret again, as it can while a Secret is deleted before its Certificate.
+func adoptSecret(c *controller.Context, name string) error {
+	cert := &cmapi.Certificate{}
+	found, err := c.Exists(cert, name)
+	if err != nil || !found {
+		return err
+	}
 	secret := &corev1.Secret{}
-	found, err := c.Exists(secret, name)
+	found, err = c.Exists(secret, name)
 	if err != nil {
 		return fmt.Errorf("get certificate secret %q: %w", name, err)
 	}
@@ -213,15 +221,11 @@ func adoptSecret(c *controller.Context, owner *tidbcorev1.Cluster, name string) 
 		return nil
 	}
 	for _, ref := range secret.OwnerReferences {
-		if ref.UID == owner.UID {
+		if ref.UID == cert.UID {
 			return nil
 		}
 	}
-	gvk, err := c.Client().GroupVersionKindFor(owner)
-	if err != nil {
-		return err
-	}
-	ownerRef := metav1.NewControllerRef(owner, gvk)
+	ownerRef := metav1.NewControllerRef(cert, cmapi.SchemeGroupVersion.WithKind(cmapi.CertificateKind))
 	// Not a controller reference: cert-manager may hold that.
 	ownerRef.Controller = nil
 	patch := &unstructured.Unstructured{}
