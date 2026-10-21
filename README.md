@@ -165,6 +165,9 @@ helm upgrade provider-tidb oci://ghcr.io/openeverest/charts/provider-tidb \
 helm uninstall provider-tidb --namespace everest-system
 ```
 
+Uninstalling the chart does **not** delete running `Instance` resources, the TiDB CRDs, or any
+data.
+
 ### Upgrading from 0.1.x
 
 - Existing Instances are left as they are: the provider does not restart their pods or change
@@ -177,9 +180,6 @@ helm uninstall provider-tidb --namespace everest-system
   ([#63](https://github.com/openeverest/provider-tidb/issues/63)). A `Backup` or `Restore` still
   `Running` from before the upgrade keeps waiting for a job that cannot start; delete it and
   create it again.
-
-Uninstalling the chart does **not** delete running `Instance` resources, the TiDB CRDs, or any
-data.
 
 ### Air-gapped installs
 
