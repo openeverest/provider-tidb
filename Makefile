@@ -209,7 +209,7 @@ install-crds: yq ## Install OpenEverest CRDs (and your operator's CRDs) into the
 	# Prometheus Operator PodMonitor the provider creates while monitoring is enabled.
 	kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/$(PROMETHEUS_OPERATOR_VERSION)/example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml
 	# VictoriaMetrics Operator VMPodScrape, picked out of the operator's combined CRD manifest.
-	# OpenEverest's monitoring stack already ships it, so only install it when missing.
+	# Clusters running the VictoriaMetrics Operator already have it, so only install it when missing.
 	kubectl get crd vmpodscrapes.operator.victoriametrics.com >/dev/null 2>&1 || \
 		curl -fsSL https://raw.githubusercontent.com/VictoriaMetrics/operator/$(VM_OPERATOR_VERSION)/config/crd/overlay/crd.yaml \
 		| $(YQ) 'select(.metadata.name == "vmpodscrapes.operator.victoriametrics.com")' \

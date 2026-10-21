@@ -289,15 +289,16 @@ toggle on while its CRD is not installed.
 
 A monitoring system only scrapes the objects its selector matches. kube-prometheus-stack, for
 example, selects `PodMonitor`s labelled `release: <its release name>`; a `VMAgent` with
-`selectAllByDefault: true` (as OpenEverest's own) takes every `VMPodScrape`. Set the labels once
+`selectAllByDefault: true` takes every `VMPodScrape`. Set the labels once
 for every Instance with the chart's `podMonitor.labels` / `vmPodScrape.labels`, or per Instance
 with `podMonitorLabels` / `podScrapeLabels` (which win on conflicts).
 
 > [!NOTE]
-> A VictoriaMetrics Operator that converts Prometheus Operator objects (OpenEverest's does) also
-> turns the `PodMonitor` into a `VMPodScrape` named `<instance>-metrics`. With both toggles on, a
-> `VMAgent` that selects both then scrapes every component twice; turn on only the one your
-> monitoring system needs.
+> Turn on the toggle of the monitoring system you run; the provider creates its scrape object
+> itself rather than relying on a VictoriaMetrics Operator converting the `PodMonitor`. If your
+> VictoriaMetrics Operator does convert Prometheus Operator objects, it also turns the
+> `PodMonitor` into a `VMPodScrape` named `<instance>-metrics`, so with both toggles on a
+> `VMAgent` scrapes every component twice.
 
 ## Topologies
 
