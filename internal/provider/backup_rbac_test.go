@@ -19,18 +19,19 @@ import (
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbbrv1 "github.com/pingcap/tidb-operator/api/v2/br/v1alpha1"
-	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
 func brContext(t *testing.T, objs ...client.Object) (*controller.Context, client.Client) {
 	t.Helper()
+	// The types the runtime registers, plus exactly those the provider declares:
+	// a type the provider applies but forgot to register fails here as it would
+	// in the cluster.
 	scheme := runtime.NewScheme()
-	for _, install := range []func(*runtime.Scheme) error{
-		corev1alpha1.AddToScheme, backupv1alpha1.AddToScheme, tidbcorev1.Install, tidbbrv1.Install,
-		corev1.AddToScheme, rbacv1.AddToScheme,
-	} {
+	for _, install := range append([]func(*runtime.Scheme) error{
+		corev1alpha1.AddToScheme, backupv1alpha1.AddToScheme, corev1.AddToScheme,
+	}, New().SchemeFuncs...) {
 		if err := install(scheme); err != nil {
 			t.Fatal(err)
 		}

@@ -4,6 +4,7 @@ package provider
 import (
 	"context"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,6 +52,8 @@ func New() *Provider {
 				monitoringv1.AddToScheme,
 				vmv1beta1.AddToScheme,
 				cmapi.AddToScheme,
+				// The ServiceAccount, Role and RoleBinding the BR jobs run as.
+				rbacv1.AddToScheme,
 			},
 			WatchConfigs: []controller.WatchConfig{
 				controller.WatchOwned(&tidbcorev1.Cluster{}),
