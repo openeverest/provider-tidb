@@ -3,6 +3,7 @@ module github.com/openeverest/provider-tidb
 go 1.27.1
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/openeverest/openeverest/v2 v2.0.0-dev.4
 	github.com/pingcap/tidb-operator/api/v2 v2.0.0-20260325134427-c1490b6fd060
 	github.com/robfig/cron/v3 v3.0.1
