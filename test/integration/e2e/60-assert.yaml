@@ -1,0 +1,11 @@
+# The operator evicted the leaders, PD moved the regions off the removed store
+# and the group is down to one TiKV node.
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiKVGroup
+metadata:
+  name: test-instance
+spec:
+  replicas: 1
+status:
+  replicas: 1
+  readyReplicas: 1

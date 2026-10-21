@@ -1,0 +1,9 @@
+# Two TiKV nodes cannot hold PD's default three copies of every region.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  components:
+    tikv:
+      replicas: 2

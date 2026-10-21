@@ -1,0 +1,15 @@
+# The provider scales the TiDBGroup and reports Updating until the operator
+# brings the new TiDB instance up.
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiDBGroup
+metadata:
+  name: test-instance
+spec:
+  replicas: 2
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+status:
+  phase: Updating

@@ -1,0 +1,34 @@
+# The limits land on each group's template, which the operator applies as both
+# requests and limits.
+apiVersion: core.pingcap.com/v1alpha1
+kind: PDGroup
+metadata:
+  name: test-instance
+spec:
+  template:
+    spec:
+      resources:
+        cpu: 500m
+        memory: 1Gi
+---
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiKVGroup
+metadata:
+  name: test-instance
+spec:
+  template:
+    spec:
+      resources:
+        cpu: "1"
+        memory: 2Gi
+---
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiDBGroup
+metadata:
+  name: test-instance
+spec:
+  template:
+    spec:
+      resources:
+        cpu: 750m
+        memory: 1536Mi

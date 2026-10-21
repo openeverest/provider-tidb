@@ -1,0 +1,35 @@
+# Every group targets the new bundle's version, and the Instance reports
+# Updating until the operator has rolled each group onto it.
+apiVersion: core.pingcap.com/v1alpha1
+kind: PDGroup
+metadata:
+  name: test-instance
+spec:
+  template:
+    spec:
+      version: v8.5.2
+---
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiKVGroup
+metadata:
+  name: test-instance
+spec:
+  template:
+    spec:
+      version: v8.5.2
+---
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiDBGroup
+metadata:
+  name: test-instance
+spec:
+  template:
+    spec:
+      version: v8.5.2
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+status:
+  phase: Updating

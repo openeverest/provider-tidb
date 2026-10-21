@@ -1,0 +1,9 @@
+# Scaling TiDB out on a running Instance.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  components:
+    tidb:
+      replicas: 2

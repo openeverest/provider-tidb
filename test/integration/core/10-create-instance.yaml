@@ -1,5 +1,6 @@
 # Instance applied by the create-instance step. Single node per component for a
-# fast lifecycle test (PD replicas must be odd; 1 is valid).
+# fast lifecycle test (PD replicas must be odd; 1 is valid). It starts on the
+# older version bundle so the upgrade-version step can move it to the default.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
@@ -7,7 +8,7 @@ metadata:
 spec:
   providerRef:
     name: tidb
-  version: "8.5.2"
+  version: "7.5.5"
   topology:
     type: cluster
   components:

@@ -1,0 +1,7 @@
+# Moving the Instance to the default version bundle.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  version: "8.5.2"
