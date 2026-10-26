@@ -66,7 +66,7 @@ Optional integrations, needed only for the features that use them:
 | [Monitoring](#monitoring) → Prometheus | Prometheus Operator (`PodMonitor`, `monitoring.coreos.com/v1`) | kube-prometheus-stack |
 | [Monitoring](#monitoring) → VictoriaMetrics | VictoriaMetrics Operator (`VMPodScrape`, `operator.victoriametrics.com/v1beta1`) | `v0.54.1` |
 | [Certificates from cert-manager](#certificates-from-cert-manager) | cert-manager | `v1.20.2` |
-| [Backups and restores](#capabilities) | S3-compatible object storage | AWS S3 API, SeaweedFS |
+| [Backups and restores](#capabilities) | S3-compatible object storage | AWS S3 API, SeaweedFS, Linode Object Storage |
 
 The bundled operator manages TiDB engine versions independently (see [Versions](#versions)).
 
