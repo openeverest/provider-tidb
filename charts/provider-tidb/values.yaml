@@ -228,7 +228,9 @@ presets:
           resources:
             limits: {cpu: "4", memory: 8Gi}
   # The standard cluster plus two TiFlash nodes, so tables can keep two
-  # columnar replicas for analytical queries (HTAP).
+  # columnar replicas for analytical queries (HTAP). TiFlash runs the joins and
+  # aggregations of those queries in memory: with 16Gi it ran out of memory under
+  # CH-benCHmark at 100 warehouses with four analytical clients; 32Gi did not.
   - name: analytics
     enabled: true
     spec:
@@ -263,7 +265,7 @@ presets:
           type: tiflash
           replicas: 2
           resources:
-            limits: {cpu: "4", memory: 16Gi}
+            limits: {cpu: "4", memory: 32Gi}
           storage:
             size: 100Gi
 
