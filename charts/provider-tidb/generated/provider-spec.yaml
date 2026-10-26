@@ -261,13 +261,13 @@ spec:
           components:
             prometheus:
               fieldParams:
-                helperText: Creates a PodMonitor that scrapes PD, TiKV, TiDB and TiFlash. Requires the Prometheus Operator.
+                helperText: Creates a PodMonitor that scrapes PD, TiKV, TiDB, TiFlash and TiProxy. Requires the Prometheus Operator.
                 label: Prometheus
               path: spec.topology.parameters.monitoring.prometheus.enabled
               uiType: toggle
             victoriaMetrics:
               fieldParams:
-                helperText: Creates a VMPodScrape that scrapes PD, TiKV, TiDB and TiFlash. Requires the VictoriaMetrics Operator.
+                helperText: Creates a VMPodScrape that scrapes PD, TiKV, TiDB, TiFlash and TiProxy. Requires the VictoriaMetrics Operator.
                 label: VictoriaMetrics
               path: spec.topology.parameters.monitoring.victoriaMetrics.enabled
               uiType: toggle

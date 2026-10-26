@@ -57,7 +57,8 @@ type Monitoring struct {
 	VictoriaMetrics *VictoriaMetrics `json:"victoriaMetrics,omitempty"`
 }
 
-// Prometheus configures the PodMonitor that scrapes PD, TiKV, TiDB and TiFlash.
+// Prometheus configures the PodMonitor that scrapes PD, TiKV, TiDB, TiFlash and
+// TiProxy.
 type Prometheus struct {
 	// Enabled creates the PodMonitor; disabling it removes the PodMonitor.
 	Enabled bool `json:"enabled,omitempty"`
@@ -69,8 +70,8 @@ type Prometheus struct {
 	PodMonitorLabels map[string]string `json:"podMonitorLabels,omitempty"`
 }
 
-// VictoriaMetrics configures the VMPodScrape that scrapes PD, TiKV, TiDB and
-// TiFlash.
+// VictoriaMetrics configures the VMPodScrape that scrapes PD, TiKV, TiDB,
+// TiFlash and TiProxy.
 type VictoriaMetrics struct {
 	// Enabled creates the VMPodScrape; disabling it removes the VMPodScrape.
 	Enabled bool `json:"enabled,omitempty"`
