@@ -31,7 +31,46 @@ func validateVersions(c *controller.Context) error {
 	if err != nil {
 		return err
 	}
-	return checkNoDowngrade(current, target)
+	if err := checkNoDowngrade(current, target); err != nil {
+		return err
+	}
+	return validateTiProxyVersion(c)
+}
+
+// validateTiProxyVersion checks TiProxy on its own: it has its own version line,
+// so it is neither ordered against nor compared with the TiDB components.
+func validateTiProxyVersion(c *controller.Context) error {
+	comp, ok := enabledTiProxy(c.Instance().Spec.Components)
+	if !ok {
+		return nil
+	}
+	to := comp.Version
+	if to == "" {
+		bundle, err := versionBundleComponents(c)
+		if err != nil {
+			return err
+		}
+		to = bundle[common.ComponentTiProxy]
+	}
+	if to == "" {
+		return nil
+	}
+	if !semver.IsValid(canonicalVersion(to)) {
+		return fmt.Errorf("%s version %q is not a valid semantic version", common.ComponentTiProxy, to)
+	}
+	group := &tidbcorev1.TiProxyGroup{}
+	found, err := c.Exists(group, c.Name())
+	if err != nil {
+		return fmt.Errorf("reading current tiproxy version: %w", err)
+	}
+	from := group.Spec.Template.Spec.Version
+	if !found || !semver.IsValid(canonicalVersion(from)) {
+		return nil
+	}
+	if semver.Compare(canonicalVersion(to), canonicalVersion(from)) < 0 {
+		return fmt.Errorf("downgrading %s from %s to %s is not supported", common.ComponentTiProxy, from, to)
+	}
+	return nil
 }
 
 // targetVersions resolves each running component's requested version: an

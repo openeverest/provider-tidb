@@ -63,6 +63,23 @@ func StatusTiDB(c *controller.Context) (controller.Status, error) {
 			commonStatus: tiflash.Status.CommonStatus, groupStatus: tiflash.Status.GroupStatus, removing: !tiflashEnabled,
 		})
 	}
+	tiproxy := &tidbcorev1.TiProxyGroup{}
+	found, err = c.Exists(tiproxy, c.Name())
+	if err != nil {
+		return controller.Status{}, fmt.Errorf("get tiproxy group: %w", err)
+	}
+	tiproxySpec, tiproxyEnabled := enabledTiProxy(c.Instance().Spec.Components)
+	switch {
+	case tiproxyEnabled && !found:
+		groups = append(groups, groupRollout{
+			component: common.ComponentTiProxy, replicas: replicasOrDefault(tiproxySpec.Replicas, defaultTiProxyReplicas),
+		})
+	case found:
+		groups = append(groups, groupRollout{
+			component: common.ComponentTiProxy, replicas: tiproxy.Spec.Replicas, version: tiproxy.Spec.Template.Spec.Version,
+			commonStatus: tiproxy.Status.CommonStatus, groupStatus: tiproxy.Status.GroupStatus, removing: !tiproxyEnabled,
+		})
+	}
 	problems, err := instanceProblems(c)
 	if err != nil {
 		return controller.Status{}, err
@@ -170,7 +187,7 @@ func evaluateStatus(previous corev1alpha1.InstancePhase, groups []groupRollout) 
 }
 
 // instanceProblems reads the conditions the operator keeps on each PD, TiKV,
-// TiDB and TiFlash instance and returns the most severe problem per component.
+// TiDB, TiFlash and TiProxy instance and returns the most severe problem per component.
 func instanceProblems(c *controller.Context) (map[string]componentProblem, error) {
 	inCluster := client.MatchingLabels{tidbcorev1.LabelKeyCluster: c.Name()}
 	problems := map[string]componentProblem{}
@@ -205,6 +222,14 @@ func instanceProblems(c *controller.Context) (map[string]componentProblem, error
 	}
 	for i := range tiflashes.Items {
 		recordProblem(problems, common.ComponentTiFlash, tiflashes.Items[i].Name, tiflashes.Items[i].Status.Conditions)
+	}
+
+	tiproxies := &tidbcorev1.TiProxyList{}
+	if err := c.List(tiproxies, inCluster); err != nil {
+		return nil, fmt.Errorf("listing tiproxy instances: %w", err)
+	}
+	for i := range tiproxies.Items {
+		recordProblem(problems, common.ComponentTiProxy, tiproxies.Items[i].Name, tiproxies.Items[i].Status.Conditions)
 	}
 
 	return problems, nil
@@ -261,14 +286,21 @@ func isStuckContainer(message string) bool {
 	return false
 }
 
-// connectionDetails points at the TiDB internal (SQL) service, which the
-// operator names "<group>-tidb" and exposes on the MySQL client port.
+// connectionDetails points at the internal (SQL) service clients should use:
+// TiProxy's "<group>-tiproxy" on its client port while TiProxy runs, otherwise
+// TiDB's "<group>-tidb" on the MySQL client port.
 func connectionDetails(c *controller.Context) controller.ConnectionDetails {
+	host := fmt.Sprintf("%s-tidb.%s", c.Name(), c.Namespace())
+	port := tidbcorev1.DefaultTiDBPortClient
+	if _, ok := enabledTiProxy(c.Instance().Spec.Components); ok {
+		host = fmt.Sprintf("%s-tiproxy.%s", c.Name(), c.Namespace())
+		port = tidbcorev1.DefaultTiProxyPortClient
+	}
 	details := controller.ConnectionDetails{
 		Type:     "mysql",
 		Provider: common.ProviderName,
-		Host:     fmt.Sprintf("%s-tidb.%s", c.Name(), c.Namespace()),
-		Port:     strconv.Itoa(tidbcorev1.DefaultTiDBPortClient),
+		Host:     host,
+		Port:     strconv.Itoa(port),
 		Username: rootUser,
 		Password: readRootPassword(c),
 	}

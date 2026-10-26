@@ -33,6 +33,7 @@ const (
 	defaultTiKVReplicas    int32 = 3
 	defaultTiDBReplicas    int32 = 2
 	defaultTiFlashReplicas int32 = 1
+	defaultTiProxyReplicas int32 = 2
 )
 
 var defaultVolumeSize = resource.MustParse("10Gi")
@@ -102,6 +103,10 @@ func SyncTiDB(c *controller.Context) error {
 		return err
 	}
 
+	if err := syncTiProxy(c, providerSpec, owner); err != nil {
+		return err
+	}
+
 	if err := syncMonitoring(c); err != nil {
 		return err
 	}
@@ -134,6 +139,33 @@ func syncTiFlash(c *controller.Context, providerSpec *corev1alpha1.ProviderSpec,
 // component is present and does not ask for zero replicas.
 func enabledTiFlash(comps map[string]corev1alpha1.ComponentSpec) (corev1alpha1.ComponentSpec, bool) {
 	comp, ok := comps[common.ComponentTiFlash]
+	if !ok || (comp.Replicas != nil && *comp.Replicas == 0) {
+		return corev1alpha1.ComponentSpec{}, false
+	}
+	return comp, true
+}
+
+// syncTiProxy applies the TiProxy group while TiProxy is enabled and deletes it
+// once disabled.
+func syncTiProxy(c *controller.Context, providerSpec *corev1alpha1.ProviderSpec, owner *tidbcorev1.Cluster) error {
+	if tiproxy, ok := enabledTiProxy(c.Instance().Spec.Components); ok {
+		return applyOwnedByCluster(c, owner, buildTiProxyGroup(c, tiproxy, resolveImage(providerSpec, common.ComponentTiProxy, tiproxy)))
+	}
+	group := &tidbcorev1.TiProxyGroup{}
+	found, err := c.Exists(group, c.Name())
+	if err != nil {
+		return fmt.Errorf("get tiproxy group: %w", err)
+	}
+	if !found || !group.DeletionTimestamp.IsZero() {
+		return nil
+	}
+	return c.Delete(group)
+}
+
+// enabledTiProxy returns the TiProxy component when the Instance runs it: the
+// component is present and does not ask for zero replicas.
+func enabledTiProxy(comps map[string]corev1alpha1.ComponentSpec) (corev1alpha1.ComponentSpec, bool) {
+	comp, ok := comps[common.ComponentTiProxy]
 	if !ok || (comp.Replicas != nil && *comp.Replicas == 0) {
 		return corev1alpha1.ComponentSpec{}, false
 	}
@@ -437,6 +469,29 @@ func buildTiFlashGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, i
 			Cluster:  clusterRef(c),
 			Replicas: replicasOrDefault(comp.Replicas, defaultTiFlashReplicas),
 			Template: tidbcorev1.TiFlashTemplate{Spec: tmpl},
+		},
+	}
+}
+
+func buildTiProxyGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, image string) *tidbcorev1.TiProxyGroup {
+	// TiProxy is stateless: no data volume.
+	tmpl := tidbcorev1.TiProxyTemplateSpec{
+		Version:   comp.Version,
+		Resources: toResources(comp.Resources),
+		Overlay:   podOverlay(c, common.ComponentTiProxy, comp.SchedulingPolicy),
+	}
+	if image != "" {
+		tmpl.Image = &image
+	}
+	if cfg := componentConfig(c, comp); cfg != "" {
+		tmpl.Config = tidbcorev1.ConfigFile(cfg)
+	}
+	return &tidbcorev1.TiProxyGroup{
+		ObjectMeta: c.ObjectMeta(c.Name()),
+		Spec: tidbcorev1.TiProxyGroupSpec{
+			Cluster:  clusterRef(c),
+			Replicas: replicasOrDefault(comp.Replicas, defaultTiProxyReplicas),
+			Template: tidbcorev1.TiProxyTemplate{Spec: tmpl},
 		},
 	}
 }

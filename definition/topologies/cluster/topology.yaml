@@ -6,6 +6,8 @@
 #   tidb -> TiDBGroup  (stateless SQL layer, MySQL protocol)
 # plus the optional columnar engine for analytics (HTAP):
 #   tiflash -> TiFlashGroup (enabled while it has at least one replica)
+# and the optional connection proxy in front of TiDB:
+#   tiproxy -> TiProxyGroup (enabled while it has at least one replica)
 #
 # This file defines both the structural topology (config) and its UI rendering.
 
@@ -51,6 +53,15 @@ config:
         required: [storage]
         properties:
           storage: {}
+          resources: {}
+          replicas: {minimum: 0}
+          schedulingPolicy: {}
+    tiproxy:
+      optional: true
+      # Stateless like TiDB: no storage. 0 replicas runs no TiProxy nodes and
+      # clients connect to TiDB directly.
+      supportedFields:
+        properties:
           resources: {}
           replicas: {minimum: 0}
           schedulingPolicy: {}
@@ -270,6 +281,52 @@ ui:
             - replicas
             - resources
             - storageClass
+    tiproxy:
+      label: "Connection proxy (TiProxy)"
+      description: "Optional proxy in front of TiDB. It balances sessions across the TiDB nodes and keeps client connections open while TiDB nodes are added, removed or restarted. Turning it on or off changes the connection endpoint."
+      components:
+        tiproxyGroup:
+          uiType: group
+          components:
+            replicas:
+              path: "spec.components.tiproxy.replicas"
+              uiType: number
+              fieldParams:
+                label: "Number of TiProxy nodes"
+                helperText: "0 runs the cluster without TiProxy; clients connect to TiDB directly"
+                defaultValue: 0
+              validation:
+                min: 0
+                int: true
+            resources:
+              uiType: group
+              groupType: line
+              components:
+                cpu:
+                  path: "spec.components.tiproxy.resources.limits.cpu"
+                  uiType: number
+                  fieldParams:
+                    label: "CPU"
+                    defaultValue: 1
+                    step: 1
+                  validation:
+                    min: 0.5
+                    required: true
+                memory:
+                  path: "spec.components.tiproxy.resources.limits.memory"
+                  uiType: number
+                  fieldParams:
+                    label: "Memory"
+                    defaultValue: 1
+                    step: 0.1
+                    badge: "Gi"
+                    badgeToApi: true
+                  validation:
+                    min: 0.5
+                    required: true
+          componentsOrder:
+            - replicas
+            - resources
     pd:
       label: "Placement Driver (PD)"
       description: "Metadata, timestamp and scheduling nodes. Use an odd number for quorum."
@@ -467,16 +524,26 @@ ui:
             multiline: true
             minRows: 3
             maxRows: 8
+        tiproxyConfig:
+          uiType: text
+          path: spec.components.tiproxy.parameters.config
+          fieldParams:
+            label: "TiProxy configuration (TOML)"
+            multiline: true
+            minRows: 3
+            maxRows: 8
       componentsOrder:
         - tidbConfig
         - tikvConfig
         - pdConfig
         - tiflashConfig
+        - tiproxyConfig
   sectionsOrder:
     - databaseVersion
     - tidb
     - tikv
     - tiflash
+    - tiproxy
     - pd
     - security
     - monitoring

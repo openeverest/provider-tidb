@@ -153,6 +153,7 @@
     - tidbgroups
     - tiflashgroups
     - tikvgroups
+    - tiproxygroups
   verbs:
     - create
     - delete
@@ -169,6 +170,7 @@
     - tidbgroups/status
     - tiflashgroups/status
     - tikvgroups/status
+    - tiproxygroups/status
   verbs:
     - get
 - apiGroups:
@@ -178,6 +180,7 @@
     - tidbs
     - tiflashes
     - tikvs
+    - tiproxies
   verbs:
     - get
     - list

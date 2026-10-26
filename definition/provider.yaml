@@ -15,4 +15,7 @@ components:
     tiflash:
         type: tiflash
         parametersSchema: TiflashParameters
+    tiproxy:
+        type: tiproxy
+        parametersSchema: TiproxyParameters
 name: tidb

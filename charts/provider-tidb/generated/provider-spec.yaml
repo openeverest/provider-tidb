@@ -30,6 +30,13 @@ spec:
           version: v8.5.2
         - image: pingcap/tikv:v7.5.5
           version: v7.5.5
+    tiproxy:
+      defaultVersion: v1.3.3
+      versions:
+        - image: pingcap/tiproxy:v1.3.3
+          version: v1.3.3
+        - image: pingcap/tiproxy:v1.3.2
+          version: v1.3.2
   components:
     pd:
       parametersSchema:
@@ -63,6 +70,14 @@ spec:
               type: string
           type: object
       type: tikv
+    tiproxy:
+      parametersSchema:
+        openAPIV3Schema:
+          properties:
+            config:
+              type: string
+          type: object
+      type: tiproxy
   defaultVersion: 8.5.2
   release:
     version: 0.1.1
@@ -111,6 +126,15 @@ spec:
                 storage: {}
               required:
                 - storage
+        tiproxy:
+          optional: true
+          supportedFields:
+            openAPIV3Schema:
+              properties:
+                replicas:
+                  minimum: 0
+                resources: {}
+                schedulingPolicy: {}
       parametersSchema:
         openAPIV3Schema:
           properties:
@@ -196,11 +220,20 @@ spec:
                 multiline: true
               path: spec.components.tikv.parameters.config
               uiType: text
+            tiproxyConfig:
+              fieldParams:
+                label: TiProxy configuration (TOML)
+                maxRows: 8
+                minRows: 3
+                multiline: true
+              path: spec.components.tiproxy.parameters.config
+              uiType: text
           componentsOrder:
             - tidbConfig
             - tikvConfig
             - pdConfig
             - tiflashConfig
+            - tiproxyConfig
           description: Per-component configuration overrides.
           label: Advanced configuration
         databaseVersion:
@@ -578,11 +611,58 @@ spec:
               uiType: group
           description: Distributed key-value storage nodes.
           label: Storage Layer (TiKV)
+        tiproxy:
+          components:
+            tiproxyGroup:
+              components:
+                replicas:
+                  fieldParams:
+                    defaultValue: 0
+                    helperText: 0 runs the cluster without TiProxy; clients connect to TiDB directly
+                    label: Number of TiProxy nodes
+                  path: spec.components.tiproxy.replicas
+                  uiType: number
+                  validation:
+                    int: true
+                    min: 0
+                resources:
+                  components:
+                    cpu:
+                      fieldParams:
+                        defaultValue: 1
+                        label: CPU
+                        step: 1
+                      path: spec.components.tiproxy.resources.limits.cpu
+                      uiType: number
+                      validation:
+                        min: 0.5
+                        required: true
+                    memory:
+                      fieldParams:
+                        badge: Gi
+                        badgeToApi: true
+                        defaultValue: 1
+                        label: Memory
+                        step: 0.1
+                      path: spec.components.tiproxy.resources.limits.memory
+                      uiType: number
+                      validation:
+                        min: 0.5
+                        required: true
+                  groupType: line
+                  uiType: group
+              componentsOrder:
+                - replicas
+                - resources
+              uiType: group
+          description: Optional proxy in front of TiDB. It balances sessions across the TiDB nodes and keeps client connections open while TiDB nodes are added, removed or restarted. Turning it on or off changes the connection endpoint.
+          label: Connection proxy (TiProxy)
       sectionsOrder:
         - databaseVersion
         - tidb
         - tikv
         - tiflash
+        - tiproxy
         - pd
         - security
         - monitoring
@@ -593,10 +673,12 @@ spec:
         tidb: v8.5.2
         tiflash: v8.5.2
         tikv: v8.5.2
+        tiproxy: v1.3.3
       name: 8.5.2
     - components:
         pd: v7.5.5
         tidb: v7.5.5
         tiflash: v7.5.5
         tikv: v7.5.5
+        tiproxy: v1.3.3
       name: 7.5.5
