@@ -22,8 +22,8 @@ the native custom resources of an upstream Kubernetes operator. This repository 
 for TiDB: it owns the technology-specific knowledge — components, topologies, versions and
 parameters — so that users, the API server, and the UI stay technology-agnostic.
 
-A TiDB cluster is composed of three mandatory components plus optional TiFlash, each reconciled
-into its own TiDB Operator v2 resource:
+A TiDB cluster is composed of three mandatory components plus optional TiFlash and TiProxy, each
+reconciled into its own TiDB Operator v2 resource:
 
 | Component | Role | Operator resource |
 |---|---|---|
@@ -31,6 +31,7 @@ into its own TiDB Operator v2 resource:
 | `tikv` | Distributed key-value storage engine | `TiKVGroup` |
 | `tidb` | Stateless SQL layer (MySQL protocol) | `TiDBGroup` |
 | `tiflash` *(optional)* | Columnar replicas for analytical queries (HTAP) | `TiFlashGroup` |
+| `tiproxy` *(optional)* | Connection proxy in front of TiDB: balances sessions and keeps them open while TiDB changes | `TiProxyGroup` |
 
 > [!IMPORTANT]
 > **This provider is not standalone.** It requires an OpenEverest installation (core CRDs and
@@ -77,14 +78,15 @@ is covered under [Installation](#installation).
 
 | Capability | Status | Notes |
 |---|---|---|
-| Provisioning | ✅ | PD + TiKV + TiDB, optionally TiFlash |
+| Provisioning | ✅ | PD + TiKV + TiDB, optionally TiFlash and TiProxy |
 | Horizontal scaling | ✅ | Per-component `replicas`; TiKV can't be scaled in below PD's `max-replicas` (see below) |
 | Vertical scaling (CPU / memory) | ✅ | Per-component `resources` |
 | Custom configuration | ✅ | Inline TOML `config` per component |
 | Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
-| Version upgrades | ✅ | Change the version bundle; the operator rolls PD → TiFlash → TiKV → TiDB. Downgrades are rejected |
-| Monitoring | ✅ | Prometheus `PodMonitor` or VictoriaMetrics `VMPodScrape` for PD, TiKV, TiDB and TiFlash (see [Monitoring](#monitoring)) |
+| Version upgrades | ✅ | Change the version bundle; the operator rolls PD → TiFlash → TiKV → TiDB. TiProxy has its own version line. Downgrades are rejected |
+| Monitoring | ✅ | Prometheus `PodMonitor` or VictoriaMetrics `VMPodScrape` for PD, TiKV, TiDB, TiFlash and TiProxy (see [Monitoring](#monitoring)) |
 | TLS | ✅ | mTLS between components and TLS for MySQL clients, with provider-issued certificates (see [Security](#security)) |
+| Connection proxy | ✅ | Optional TiProxy: session balancing and connections that survive TiDB restarts and scaling (see [TiProxy](#tiproxy)) |
 
 Stateful components (PD, TiKV, TiFlash) additionally report:
 
@@ -245,7 +247,8 @@ kubectl get instances.core.openeverest.io my-tidb -w
 kubectl get instances.core.openeverest.io my-tidb -o jsonpath='{.status.connectionSecretRef.name}'
 ```
 
-The connection secret holds the MySQL `host`, `port` (4000), `username` (`root`) and `password`.
+The connection secret holds the MySQL `host`, `port` (4000, or 6000 through [TiProxy](#tiproxy)),
+`username` (`root`) and `password`.
 The provider generates a random `root` password on first bootstrap (via the operator's
 `bootstrapSQL`), stores it in a Secret, and surfaces it here. Connect with any MySQL client:
 
@@ -262,11 +265,11 @@ mysql -h my-tidb-tidb.<namespace> -P 4000 -u root -p"$(kubectl get secret my-tid
 
 The chart ships `InstancePreset`s, so the UI can create a working cluster in one click:
 
-| Preset | PD | TiKV | TiDB | TiFlash | Use it for |
-|---|---|---|---|---|---|
-| `tidb-dev` | 1 | 1 | 1 | — | A laptop or CI: the smallest cluster that runs (about 4 GiB) |
-| `tidb-standard` | 3 | 3 | 2 | — | A highly available transactional database |
-| `tidb-analytics` | 3 | 3 | 2 | 2 | Transactions plus analytics on the same data |
+| Preset | PD | TiKV | TiDB | TiFlash | TiProxy | Use it for |
+|---|---|---|---|---|---|---|
+| `tidb-dev` | 1 | 1 | 1 | — | — | A laptop or CI: the smallest cluster that runs (about 4 GiB) |
+| `tidb-standard` | 3 | 3 | 2 | — | 2 | A highly available transactional database |
+| `tidb-analytics` | 3 | 3 | 2 | 2 | 2 | Transactions plus analytics on the same data |
 
 `tidb-dev` has no redundancy and sets PD's `max-replicas` to `1`, so PD stops trying to place
 three copies of the data on its single TiKV node. To try TiFlash on it, add a `tiflash`
@@ -276,12 +279,88 @@ list itself
 live under `presets:` in [values.yaml](charts/provider-tidb/values.yaml); set `enabled: false`
 to hide one.
 
+### TiProxy
+
+[TiProxy](https://docs.pingcap.com/tidb/stable/tiproxy-overview) is a MySQL-protocol proxy in
+front of TiDB. Clients connect to TiProxy, which:
+
+- balances sessions across the TiDB nodes, and keeps rebalancing them: after a scale-out it
+  migrates existing sessions to the new TiDB nodes, not just new connections;
+- keeps client connections open while TiDB nodes are restarted (rolling upgrades, configuration
+  changes) or removed by a scale-in, by migrating each session to another TiDB node first.
+
+It runs while `spec.components.tiproxy` is present with a replica count other than `0` (the UI's
+**Connection proxy (TiProxy)** section defaults to `0`; the `tidb-standard` and `tidb-analytics`
+presets run two TiProxy nodes):
+
+```yaml
+spec:
+  components:
+    tiproxy:
+      type: tiproxy
+      replicas: 2
+      resources:
+        limits: {cpu: "2", memory: 2Gi}
+```
+
+Setting the replica count to `0` (or removing the component) deletes the TiProxy nodes; the
+Instance reports `Updating` with `tiproxy (removing)` until they are gone.
+
+> [!IMPORTANT]
+> **Turning TiProxy on or off changes the connection endpoint.** While TiProxy runs, the
+> connection Secret points at TiProxy's Service `<instance>-tiproxy.<namespace>`, port `6000`;
+> without it, at TiDB's `<instance>-tidb.<namespace>`, port `4000`. The Secret switches once the
+> Instance is `Ready` again. Both Services keep working while both exist, so move clients over
+> before turning TiProxy off: their connections through TiProxy are closed with it.
+
+TiProxy has its own version line, independent of TiDB: every version bundle runs TiProxy
+`v1.3.3`; set `spec.components.tiproxy.version` to pick another one from
+[definition/versions.yaml](definition/versions.yaml). It is not ordered against the TiDB
+components, but downgrades are still rejected. Other settings go in
+`spec.components.tiproxy.parameters.config` as TOML
+([TiProxy configuration](https://docs.pingcap.com/tidb/stable/tiproxy-configuration)).
+
+With [TLS](#security), TiProxy follows the Instance's settings: with `tls.client` it serves MySQL
+clients over TLS with a certificate for `<instance>-tiproxy` signed by the CA in the connection
+Secret (client certificates are optional, as with TiDB) and connects to TiDB over TLS as well; with
+`tls.cluster` it uses mTLS towards PD and TiDB's status port and serves its API (and metrics) over
+https.
+
+**Session migration needs a shared signing certificate.** TiProxy moves a session with a token
+the old TiDB node signs and the new one verifies, so all TiDB nodes need the same certificate. The
+provider issues one into `<instance>-session-token-signing-secret` (also without TLS) and turns on
+TiDB Operator's `SessionTokenSigning` feature gate, which mounts it into TiDB. TiDB Operator only
+lets feature gates change on a `Cluster` that already has `FeatureModification` on, so:
+
+- an Instance **created with TiProxy** gets both gates (`FeatureModification`,
+  `SessionTokenSigning`) from the start, and nothing restarts;
+- turning TiProxy **on for an existing Instance** first turns on `FeatureModification`, which
+  updates the operator's resources in place without restarting any pod. Once every TiDB node
+  carries it, the provider turns on `SessionTokenSigning`, and the operator **replaces the TiDB
+  pods one at a time** (a new pod starts before an old one stops). TiProxy balances connections
+  from the start, but sessions on the TiDB pods that predate the signing certificate cannot be
+  migrated, so this one roll closes them. Expect the Instance to be `Updating` until it is done.
+
+The gates and the signing certificate stay when TiProxy is turned off, so turning it on again
+does not restart TiDB.
+
+> [!TIP]
+> TiProxy moves a session only between transactions, and only while its TiDB node still runs.
+> When a TiDB pod stops, TiDB Operator first lets it serve for 10 more seconds, then TiDB reports
+> itself unhealthy for
+> [`graceful-wait-before-shutdown`](https://docs.pingcap.com/tidb/stable/tidb-configuration-file#graceful-wait-before-shutdown-new-in-v50)
+> seconds, which is when TiProxy moves the sessions away, and then closes the connections left. The
+> default is `0`, which leaves TiProxy no time, so set it in the TiDB `config`, e.g.
+> `graceful-wait-before-shutdown = 15`. PingCAP recommends 10 seconds more than your longest
+> transaction; the pod is killed 30 seconds after it starts stopping, so values above 20 are cut short.
+> Changing the TiDB config restarts the TiDB pods once.
+
 ### Monitoring
 
-PD, TiKV, TiDB and TiFlash serve Prometheus metrics natively, so no exporter is needed. The
-**Monitoring** section of the UI (`spec.topology.parameters.monitoring`) has a toggle per
+PD, TiKV, TiDB, TiFlash and TiProxy serve Prometheus metrics natively, so no exporter is needed.
+The **Monitoring** section of the UI (`spec.topology.parameters.monitoring`) has a toggle per
 monitoring system; each makes the provider create one scrape object for every component's
-`/metrics` endpoint:
+metrics endpoint (`/metrics`, and `/api/metrics` on TiProxy's API port):
 
 | Toggle | Creates | Requires |
 |---|---|---|
@@ -331,8 +410,8 @@ New Instances encrypt their traffic by default. The **Security** section of the 
 
 | Toggle | Field | Effect |
 |---|---|---|
-| Encrypt traffic between components (mTLS) | `tls.cluster` | PD, TiKV, TiDB and TiFlash authenticate each other with certificates and encrypt their traffic |
-| Encrypt client connections (TLS) | `tls.client` | MySQL clients can connect to TiDB over TLS |
+| Encrypt traffic between components (mTLS) | `tls.cluster` | PD, TiKV, TiDB, TiFlash and TiProxy authenticate each other with certificates and encrypt their traffic |
+| Encrypt client connections (TLS) | `tls.client` | MySQL clients can connect to TiDB (and [TiProxy](#tiproxy)) over TLS |
 
 ```yaml
 spec:
@@ -351,10 +430,14 @@ does not switch an existing cluster between plaintext and TLS. An Instance witho
 The provider generates a CA for each Instance (`<instance>-tls-ca`) and issues every
 certificate from it into the Secrets the operator mounts: `<instance>-{pd,tikv,tidb,tiflash}-cluster-secret`,
 `<instance>-cluster-client-secret` (used by the operator and by BR backups) and
-`<instance>-tidb-server-secret` (TiDB's MySQL certificate). They are deleted with the Instance.
+`<instance>-tidb-server-secret` (TiDB's MySQL certificate). While [TiProxy](#tiproxy) is enabled it
+also issues `<instance>-tiproxy-cluster-secret`, `<instance>-tiproxy-server-secret` (TiProxy's
+MySQL certificate) and `<instance>-tiproxy-tidb-secret` (TiProxy's client certificate towards
+TiDB), plus `<instance>-session-token-signing-secret` with or without TLS. They are deleted with
+the Instance.
 
 With client TLS, the connection Secret `<instance>-conn` carries the CA as `ca.crt`, and the
-published host is in TiDB's certificate, so clients can verify both:
+published host is in TiDB's (or TiProxy's) certificate, so clients can verify both:
 
 ```bash
 kubectl get secret <instance>-conn -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
@@ -403,17 +486,18 @@ and run `ALTER INSTANCE RELOAD TLS` on each TiDB to pick up the new certificates
 
 | Topology | Default | Description |
 |---|---|---|
-| `cluster` | ✅ | Standard distributed TiDB: PD + TiKV + TiDB, optionally TiFlash |
+| `cluster` | ✅ | Standard distributed TiDB: PD + TiKV + TiDB, optionally TiFlash and TiProxy |
 
 ## Versions
 
 | Version bundle | Default | Components |
 |---|---|---|
-| `8.5.2` | ✅ | PD / TiKV / TiDB / TiFlash `v8.5.2` |
-| `7.5.5` |  | PD / TiKV / TiDB / TiFlash `v7.5.5` |
+| `8.5.2` | ✅ | PD / TiKV / TiDB / TiFlash `v8.5.2`, TiProxy `v1.3.3` |
+| `7.5.5` |  | PD / TiKV / TiDB / TiFlash `v7.5.5`, TiProxy `v1.3.3` |
 
-Source of truth: [definition/versions.yaml](definition/versions.yaml). Each bundle pins every
-component to the same TiDB release; the user selects one via `Instance.spec.version`.
+Source of truth: [definition/versions.yaml](definition/versions.yaml). Each bundle pins the TiDB
+components to the same TiDB release, and TiProxy to a release of its own version line (`v1.3.3`
+or `v1.3.2` via `spec.components.tiproxy.version`); the user selects one via `Instance.spec.version`.
 
 ## Configuration
 
@@ -491,6 +575,7 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 | Storage size raised but PVCs unchanged | The StorageClass must allow volume expansion; check `kubectl get pvc` and the operator logs |
 | `Instance` turns `Failed` right after an edit, with no message | The provider rejected the change. The reason is in the provider logs (`Validation failed`); see [Known issues](#known-issues). Typical causes: shrinking storage, downgrading or reordering versions, scaling TiKV below PD's `max-replicas`, changing TLS after creation. Revert the change to return to `Ready` |
 | `Backup` or `Restore` stays `Running` | `kubectl get jobs` in the Instance's namespace and the BR job's pod logs; the BR `Backup`/`Restore` (`backups.br.pingcap.com`) conditions carry the reason |
+| TiProxy runs but does not migrate sessions | `kubectl get cluster.core.pingcap.com <instance> -o jsonpath='{.spec.featureGates}'` must list `SessionTokenSigning`. On an existing Instance the provider adds it only once every TiDB instance lists `FeatureModification` (`kubectl get tidb -o jsonpath='{.items[*].spec.features}'`); see [TiProxy](#tiproxy) |
 | Clients cannot log in after a restore | See [Known issues](#known-issues) |
 
 ## Known issues
