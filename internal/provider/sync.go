@@ -366,6 +366,7 @@ func buildCluster(c *controller.Context) (*tidbcorev1.Cluster, error) {
 		if source := tlsSource(settings); source != "" {
 			cluster.Annotations = map[string]string{tlsSourceAnnotation: source}
 		}
+		cluster.Spec.FeatureGates, cluster.Spec.Security = newClusterSessionTokenSigning(c)
 	case err != nil:
 		return nil, err
 	default:
@@ -373,6 +374,10 @@ func buildCluster(c *controller.Context) (*tidbcorev1.Cluster, error) {
 		cluster.Spec.TLSCluster = existing.Spec.TLSCluster
 		if source := existing.Annotations[tlsSourceAnnotation]; source != "" {
 			cluster.Annotations = map[string]string{tlsSourceAnnotation: source}
+		}
+		// Feature gates are frozen once set, so they change in steps (session_token.go).
+		if cluster.Spec.FeatureGates, cluster.Spec.Security, err = existingClusterSessionTokenSigning(c, existing); err != nil {
+			return nil, err
 		}
 	}
 	return cluster, nil

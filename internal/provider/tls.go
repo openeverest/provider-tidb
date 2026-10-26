@@ -125,12 +125,16 @@ func peerDNSNames(svc, namespace string) []string {
 	return names
 }
 
-// ensureTLSSecrets creates the CA and every certificate the TLS settings need,
-// owned by the Cluster so they outlive the pods during the operator's ordered
-// teardown. Existing Secrets are never replaced: certificates are issued once.
+// ensureTLSSecrets creates the CA and every certificate the TLS settings and
+// TiProxy's session migration need, owned by the Cluster so they outlive the
+// pods during the operator's ordered teardown. Existing Secrets are never
+// replaced: certificates are issued once.
 func ensureTLSSecrets(c *controller.Context, owner *tidbcorev1.Cluster) error {
 	settings := tlsSettings(c)
 	leaves := tlsLeaves(c.Name(), c.Namespace(), settings)
+	if usesSessionTokenSigning(c, owner) {
+		leaves = append(leaves, sessionTokenSigningLeaf(c.Name()))
+	}
 	if len(leaves) == 0 {
 		return nil
 	}

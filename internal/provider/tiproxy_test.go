@@ -1,6 +1,9 @@
 package provider
 
 import (
+	"context"
+	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,11 +12,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
+	metav1alpha1 "github.com/pingcap/tidb-operator/api/v2/meta/v1alpha1"
 
 	"github.com/openeverest/provider-tidb/internal/common"
 )
@@ -244,3 +249,171 @@ func testProviderWithTiProxy() *corev1alpha1.Provider {
 }
 
 func ptrTo[T any](v T) *T { return &v }
+
+// tiproxyContext is a context for in with Secrets in the scheme and the given
+// topology parameters (nil for none).
+func tiproxyContext(t *testing.T, in *corev1alpha1.Instance, params any, objs ...client.Object) (*controller.Context, client.Client) {
+	t.Helper()
+	if params != nil {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in.Spec.Topology = &corev1alpha1.TopologySpec{Type: "cluster", Parameters: &runtime.RawExtension{Raw: raw}}
+	}
+	scheme := runtime.NewScheme()
+	for _, install := range []func(*runtime.Scheme) error{corev1alpha1.AddToScheme, tidbcorev1.Install, corev1.AddToScheme} {
+		if err := install(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+	return controller.NewContext(context.Background(), cl, in, common.ProviderName), cl
+}
+
+func gateNames(gates []metav1alpha1.FeatureGate) []metav1alpha1.Feature {
+	names := make([]metav1alpha1.Feature, 0, len(gates))
+	for _, g := range gates {
+		names = append(names, g.Name)
+	}
+	return names
+}
+
+func clusterWithGates(signingSecret string, gates ...metav1alpha1.Feature) *tidbcorev1.Cluster {
+	cl := testCluster()
+	for _, g := range gates {
+		cl.Spec.FeatureGates = append(cl.Spec.FeatureGates, metav1alpha1.FeatureGate{Name: g})
+	}
+	if signingSecret != "" {
+		cl.Spec.Security = &tidbcorev1.ClusterSecurity{SessionTokenSigningCertKeyPair: &corev1.LocalObjectReference{Name: signingSecret}}
+	}
+	return cl
+}
+
+func tidbGroupWithFeatures(features ...metav1alpha1.Feature) *tidbcorev1.TiDBGroup {
+	g := &tidbcorev1.TiDBGroup{ObjectMeta: metav1.ObjectMeta{Name: "orders", Namespace: testNamespace}}
+	g.Spec.Template.Spec.Version = testVersion
+	g.Spec.Features = features
+	return g
+}
+
+func tidbInstanceWithFeatures(name string, features ...metav1alpha1.Feature) *tidbcorev1.TiDB {
+	db := &tidbcorev1.TiDB{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace, Labels: map[string]string{
+		tidbcorev1.LabelKeyCluster: "orders",
+		tidbcorev1.LabelKeyGroup:   "orders",
+	}}}
+	db.Spec.Features = features
+	return db
+}
+
+func signingSecret() *corev1.Secret {
+	return &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "orders-session-token-signing-secret", Namespace: testNamespace}}
+}
+
+func TestBuildClusterSessionTokenSigning(t *testing.T) {
+	const fm, sts = metav1alpha1.FeatureModification, metav1alpha1.SessionTokenSigning
+	const secret = "orders-session-token-signing-secret"
+	tests := []struct {
+		name        string
+		tiproxy     *int32
+		objs        []client.Object
+		wantGates   []metav1alpha1.Feature
+		wantSigning string
+	}{
+		{name: "new cluster without tiproxy"},
+		{name: "new cluster with tiproxy", tiproxy: ptrTo(int32(2)),
+			wantGates: []metav1alpha1.Feature{fm, sts}, wantSigning: secret},
+		{name: "new cluster with tiproxy at 0 replicas", tiproxy: ptrTo(int32(0))},
+		{name: "existing cluster without tiproxy", objs: []client.Object{testCluster()}},
+		{name: "tiproxy turned on: FeatureModification first", tiproxy: ptrTo(int32(2)),
+			objs:      []client.Object{testCluster(), signingSecret(), tidbGroupWithFeatures(), tidbInstanceWithFeatures("orders-a")},
+			wantGates: []metav1alpha1.Feature{fm}},
+		{name: "waits for the tidb group to carry FeatureModification", tiproxy: ptrTo(int32(2)),
+			objs:      []client.Object{clusterWithGates("", fm), signingSecret(), tidbGroupWithFeatures()},
+			wantGates: []metav1alpha1.Feature{fm}},
+		{name: "waits for every tidb instance to carry FeatureModification", tiproxy: ptrTo(int32(2)),
+			objs: []client.Object{clusterWithGates("", fm), signingSecret(), tidbGroupWithFeatures(fm),
+				tidbInstanceWithFeatures("orders-a", fm), tidbInstanceWithFeatures("orders-b")},
+			wantGates: []metav1alpha1.Feature{fm}},
+		{name: "waits for the signing secret", tiproxy: ptrTo(int32(2)),
+			objs:      []client.Object{clusterWithGates("", fm), tidbGroupWithFeatures(fm), tidbInstanceWithFeatures("orders-a", fm)},
+			wantGates: []metav1alpha1.Feature{fm}},
+		{name: "then SessionTokenSigning", tiproxy: ptrTo(int32(2)),
+			objs: []client.Object{clusterWithGates("", fm), signingSecret(), tidbGroupWithFeatures(fm),
+				tidbInstanceWithFeatures("orders-a", fm), tidbInstanceWithFeatures("orders-b", fm)},
+			wantGates: []metav1alpha1.Feature{fm, sts}, wantSigning: secret},
+		{name: "gates stay after tiproxy is turned off", tiproxy: ptrTo(int32(0)),
+			objs:      []client.Object{clusterWithGates(secret, fm, sts)},
+			wantGates: []metav1alpha1.Feature{fm, sts}, wantSigning: secret},
+		{name: "FeatureModification stays after tiproxy is turned off half way",
+			objs: []client.Object{clusterWithGates("", fm)}, wantGates: []metav1alpha1.Feature{fm}},
+		{name: "a signing secret set by someone else is kept", tiproxy: ptrTo(int32(2)),
+			objs:      []client.Object{clusterWithGates("custom", sts)},
+			wantGates: []metav1alpha1.Feature{fm, sts}, wantSigning: "custom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := testInstance("8.5.2")
+			if tt.tiproxy != nil {
+				in = withTiProxy(in, *tt.tiproxy, "")
+			}
+			c, _ := tiproxyContext(t, in, nil, tt.objs...)
+			built, err := buildCluster(c)
+			assertError(t, err, "")
+			if got := gateNames(built.Spec.FeatureGates); !slices.Equal(got, tt.wantGates) {
+				t.Errorf("feature gates = %v, want %v", got, tt.wantGates)
+			}
+			var signing string
+			if sec := built.Spec.Security; sec != nil && sec.SessionTokenSigningCertKeyPair != nil {
+				signing = sec.SessionTokenSigningCertKeyPair.Name
+			}
+			if signing != tt.wantSigning {
+				t.Errorf("session token signing secret = %q, want %q", signing, tt.wantSigning)
+			}
+		})
+	}
+}
+
+func TestEnsureSessionTokenSigningSecret(t *testing.T) {
+	tests := []struct {
+		name    string
+		tiproxy int32
+		cluster *tidbcorev1.Cluster
+		want    []string
+	}{
+		{"without tiproxy", 0, testCluster(), nil},
+		{"with tiproxy and no TLS", 2, testCluster(), []string{"orders-session-token-signing-secret", "orders-tls-ca"}},
+		{"kept while the cluster uses it", 0, clusterWithGates("orders-session-token-signing-secret",
+			metav1alpha1.FeatureModification, metav1alpha1.SessionTokenSigning),
+			[]string{"orders-session-token-signing-secret", "orders-tls-ca"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, cl := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), tt.tiproxy, ""), nil)
+			assertError(t, ensureTLSSecrets(c, tt.cluster), "")
+
+			list := &corev1.SecretList{}
+			if err := cl.List(context.Background(), list); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, s := range list.Items {
+				got = append(got, s.Name)
+			}
+			slices.Sort(got)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("secrets = %v, want %v", got, tt.want)
+			}
+			if len(got) == 0 {
+				return
+			}
+			secret := mustSecret(t, cl, "orders-session-token-signing-secret")
+			if len(secret.Data["tls.key"]) == 0 {
+				t.Error("signing secret has no tls.key")
+			}
+			if cert := parseCert(t, secret.Data["tls.crt"]); cert.Subject.CommonName != "orders-tidb-session-token" {
+				t.Errorf("signing certificate CN = %q", cert.Subject.CommonName)
+			}
+		})
+	}
+}
