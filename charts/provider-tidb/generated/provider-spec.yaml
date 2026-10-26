@@ -370,7 +370,7 @@ spec:
             clientTLS:
               fieldParams:
                 defaultValue: true
-                helperText: MySQL clients can connect to TiDB over TLS and verify it with the CA in the connection secret.
+                helperText: MySQL clients can connect to TiDB (or TiProxy) over TLS and verify it with the CA in the connection secret.
                 label: Encrypt client connections (TLS)
                 modes:
                   edit:
@@ -380,7 +380,7 @@ spec:
             clusterTLS:
               fieldParams:
                 defaultValue: true
-                helperText: PD, TiKV, TiDB and TiFlash authenticate each other with certificates and encrypt their traffic.
+                helperText: PD, TiKV, TiDB, TiFlash and TiProxy authenticate each other with certificates and encrypt their traffic.
                 label: Encrypt traffic between components (mTLS)
                 modes:
                   edit:

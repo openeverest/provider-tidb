@@ -2,10 +2,13 @@ package provider
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
+
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -20,6 +23,7 @@ import (
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 	metav1alpha1 "github.com/pingcap/tidb-operator/api/v2/meta/v1alpha1"
 
+	"github.com/openeverest/provider-tidb/definition/topologies/cluster"
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
@@ -413,6 +417,174 @@ func TestEnsureSessionTokenSigningSecret(t *testing.T) {
 			}
 			if cert := parseCert(t, secret.Data["tls.crt"]); cert.Subject.CommonName != "orders-tidb-session-token" {
 				t.Errorf("signing certificate CN = %q", cert.Subject.CommonName)
+			}
+		})
+	}
+}
+
+func TestTiProxyTLSSecrets(t *testing.T) {
+	c, cl := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), 2, ""), tlsTopology(true, true))
+	assertError(t, ensureTLSSecrets(c, testCluster()), "")
+
+	roots := x509.NewCertPool()
+	roots.AddCert(parseCert(t, mustSecret(t, cl, "orders-tls-ca").Data["ca.crt"]))
+	clientCA := string(mustSecret(t, cl, "orders-tidb-server-secret").Data["ca.crt"])
+	wants := []struct {
+		secret, dnsName string
+		usage           x509.ExtKeyUsage
+	}{
+		{"orders-tiproxy-cluster-secret", "orders-tiproxy-abc.orders-tiproxy-peer.db.svc", x509.ExtKeyUsageServerAuth},
+		{"orders-tiproxy-cluster-secret", "orders-tiproxy.db", x509.ExtKeyUsageClientAuth},
+		// The host the connection details publish while TiProxy runs.
+		{"orders-tiproxy-server-secret", "orders-tiproxy.db", x509.ExtKeyUsageServerAuth},
+		{"orders-tiproxy-tidb-secret", "", x509.ExtKeyUsageClientAuth},
+	}
+	for _, w := range wants {
+		secret := mustSecret(t, cl, w.secret)
+		// TiProxy verifies TiDB, and clients verify TiProxy, with the CA in <instance>-conn.
+		if string(secret.Data["ca.crt"]) != clientCA {
+			t.Errorf("%s: ca.crt is not the CA the connection secret carries", w.secret)
+		}
+		cert := parseCert(t, secret.Data["tls.crt"])
+		if _, err := cert.Verify(x509.VerifyOptions{Roots: roots, DNSName: w.dnsName, KeyUsages: []x509.ExtKeyUsage{w.usage}}); err != nil {
+			t.Errorf("%s: does not verify for %q as %v: %v", w.secret, w.dnsName, w.usage, err)
+		}
+	}
+}
+
+func TestTiProxyTLSSecretsSelection(t *testing.T) {
+	tiproxySecrets := []string{"orders-tiproxy-cluster-secret", "orders-tiproxy-server-secret", "orders-tiproxy-tidb-secret"}
+	tests := []struct {
+		name    string
+		tiproxy int32
+		params  any
+		want    []string
+	}{
+		{"tiproxy off", 0, tlsTopology(true, true), nil},
+		{"cluster tls", 2, tlsTopology(true, false), []string{"orders-tiproxy-cluster-secret"}},
+		{"client tls", 2, tlsTopology(false, true), []string{"orders-tiproxy-server-secret", "orders-tiproxy-tidb-secret"}},
+		{"both", 2, tlsTopology(true, true), tiproxySecrets},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), tt.tiproxy, ""), tt.params)
+			assertError(t, ensureTLSSecrets(c, testCluster()), "")
+			var got []string
+			for _, name := range tiproxySecrets {
+				if found, err := c.Exists(&corev1.Secret{}, name); err != nil {
+					t.Fatal(err)
+				} else if found {
+					got = append(got, name)
+				}
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("tiproxy secrets = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTiProxyCertManagerCertificates(t *testing.T) {
+	c, cl := certManagerContext(t, certManagerTopology(true, true, &cluster.CertManager{Enabled: true}), true)
+	c.Instance().Spec.Components[common.ComponentTiProxy] = corev1alpha1.ComponentSpec{Type: common.ComponentTiProxy}
+	assertError(t, ensureTLSSecrets(c, testCluster()), "")
+
+	certs := listCertificates(t, cl)
+	for _, name := range []string{
+		"orders-tiproxy-cluster-secret", "orders-tiproxy-server-secret", "orders-tiproxy-tidb-secret",
+		"orders-session-token-signing-secret",
+	} {
+		cert, ok := certs[name]
+		if !ok {
+			t.Errorf("no certificate %s", name)
+			continue
+		}
+		if cert.Spec.SecretName != name || cert.Spec.IssuerRef.Name != "orders-tls-ca" {
+			t.Errorf("%s: secret %q issuer %+v, want its secret signed by the CA issuer", name, cert.Spec.SecretName, cert.Spec.IssuerRef)
+		}
+	}
+	server := certs["orders-tiproxy-server-secret"].Spec
+	if !slices.Contains(server.DNSNames, "orders-tiproxy.db.svc") || !slices.Contains(server.Usages, cmapi.UsageServerAuth) {
+		t.Errorf("tiproxy server certificate = %+v", server)
+	}
+	backend := certs["orders-tiproxy-tidb-secret"].Spec
+	if len(backend.DNSNames) != 0 || !slices.Contains(backend.Usages, cmapi.UsageClientAuth) {
+		t.Errorf("tiproxy backend certificate = %+v", backend)
+	}
+	if signing := certs["orders-session-token-signing-secret"].Spec; signing.CommonName != "orders-tidb-session-token" {
+		t.Errorf("signing certificate = %+v", signing)
+	}
+}
+
+func TestBuildTiProxyGroupTLS(t *testing.T) {
+	tests := []struct {
+		name        string
+		params      any
+		config      string
+		wantTLS     bool
+		wantConfig  []string
+		wantMissing []string
+	}{
+		{name: "plaintext", params: nil, config: "[log]\nlevel = \"warn\"\n",
+			wantConfig: []string{`level = "warn"`}, wantMissing: []string{"skip-ca"}},
+		{name: "cluster tls only", params: tlsTopology(true, false), wantMissing: []string{"skip-ca"}},
+		{name: "client tls", params: tlsTopology(true, true), wantTLS: true, wantConfig: []string{"skip-ca = true"}},
+		{name: "client tls keeps the user's config", params: tlsTopology(false, true), config: "[log]\nlevel = \"warn\"\n",
+			wantTLS: true, wantConfig: []string{`level = "warn"`, "[security.server-tls]", "skip-ca = true"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := withTiProxy(testInstance("8.5.2"), 2, testTiProxyVersion)
+			if tt.config != "" {
+				comp := in.Spec.Components[common.ComponentTiProxy]
+				raw, err := json.Marshal(map[string]string{"config": tt.config})
+				if err != nil {
+					t.Fatal(err)
+				}
+				comp.Parameters = &runtime.RawExtension{Raw: raw}
+				in.Spec.Components[common.ComponentTiProxy] = comp
+			}
+			c, _ := tiproxyContext(t, in, tt.params)
+			g := buildTiProxyGroup(c, in.Spec.Components[common.ComponentTiProxy], "")
+
+			sec := g.Spec.Template.Spec.Security
+			gotTLS := sec != nil && sec.TLS != nil && sec.TLS.MySQL != nil && sec.TLS.MySQL.Enabled &&
+				sec.TLS.Backend != nil && sec.TLS.Backend.Enabled
+			if gotTLS != tt.wantTLS {
+				t.Errorf("mysql and backend tls = %v (%+v), want %v", gotTLS, sec, tt.wantTLS)
+			}
+			cfg := string(g.Spec.Template.Spec.Config)
+			for _, want := range tt.wantConfig {
+				if !strings.Contains(cfg, want) {
+					t.Errorf("config %q does not contain %q", cfg, want)
+				}
+			}
+			for _, missing := range tt.wantMissing {
+				if strings.Contains(cfg, missing) {
+					t.Errorf("config %q contains %q", cfg, missing)
+				}
+			}
+		})
+	}
+}
+
+func TestWithOptionalClientCerts(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", "[security]\n[security.server-tls]\nskip-ca = true\n"},
+		{"other settings are kept", "[log]\nlevel = \"warn\"\n[security.server-tls]\nmin-tls-version = \"1.3\"\n",
+			"[log]\nlevel = \"warn\"\n\n[security]\n[security.server-tls]\nmin-tls-version = \"1.3\"\nskip-ca = true\n"},
+		{"an explicit skip-ca wins", "[security.server-tls]\nskip-ca = false\n", "[security.server-tls]\nskip-ca = false\n"},
+		{"security is not a table", "security = 1\n", "security = 1\n"},
+		{"invalid TOML is left to the operator", "[log\n", "[log\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := withOptionalClientCerts(tt.in); got != tt.want {
+				t.Errorf("withOptionalClientCerts(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}

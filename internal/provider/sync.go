@@ -488,7 +488,18 @@ func buildTiProxyGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, i
 	if image != "" {
 		tmpl.Image = &image
 	}
-	if cfg := componentConfig(c, comp); cfg != "" {
+	cfg := componentConfig(c, comp)
+	// TiProxy serves MySQL clients with its own certificate and reaches TiDB's
+	// MySQL port over TLS too; tls.cluster needs nothing here, the operator
+	// mounts <group>-tiproxy-cluster-secret by itself.
+	if tlsSettings(c).Client {
+		tmpl.Security = &tidbcorev1.TiProxySecurity{TLS: &tidbcorev1.TiProxyTLS{
+			MySQL:   &tidbcorev1.TLS{Enabled: true},
+			Backend: &tidbcorev1.ClientTLS{Enabled: true},
+		}}
+		cfg = withOptionalClientCerts(cfg)
+	}
+	if cfg != "" {
 		tmpl.Config = tidbcorev1.ConfigFile(cfg)
 	}
 	return &tidbcorev1.TiProxyGroup{

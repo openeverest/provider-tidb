@@ -19,9 +19,10 @@ type ClusterTopologyParameters struct {
 // cert-manager instead.
 type TLS struct {
 	// Cluster encrypts and mutually authenticates the traffic between PD, TiKV,
-	// TiDB and TiFlash.
+	// TiDB, TiFlash and TiProxy.
 	Cluster bool `json:"cluster,omitempty"`
-	// Client lets MySQL clients connect to TiDB over TLS.
+	// Client lets MySQL clients connect to TiDB and TiProxy over TLS; TiProxy
+	// then reaches TiDB over TLS too.
 	Client bool `json:"client,omitempty"`
 	// CertManager issues the certificates with cert-manager. Chosen when the
 	// Instance is created, like the settings above.

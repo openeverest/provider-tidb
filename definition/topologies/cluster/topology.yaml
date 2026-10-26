@@ -415,7 +415,7 @@ ui:
           path: spec.topology.parameters.tls.cluster
           fieldParams:
             label: "Encrypt traffic between components (mTLS)"
-            helperText: "PD, TiKV, TiDB and TiFlash authenticate each other with certificates and encrypt their traffic."
+            helperText: "PD, TiKV, TiDB, TiFlash and TiProxy authenticate each other with certificates and encrypt their traffic."
             defaultValue: true
             modes:
               edit:
@@ -425,7 +425,7 @@ ui:
           path: spec.topology.parameters.tls.client
           fieldParams:
             label: "Encrypt client connections (TLS)"
-            helperText: "MySQL clients can connect to TiDB over TLS and verify it with the CA in the connection secret."
+            helperText: "MySQL clients can connect to TiDB (or TiProxy) over TLS and verify it with the CA in the connection secret."
             defaultValue: true
             modes:
               edit:
