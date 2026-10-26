@@ -344,16 +344,20 @@ lets feature gates change on a `Cluster` that already has `FeatureModification` 
 The gates and the signing certificate stay when TiProxy is turned off, so turning it on again
 does not restart TiDB.
 
-> [!TIP]
-> TiProxy moves a session only between transactions, and only while its TiDB node still runs.
-> When a TiDB pod stops, TiDB Operator first lets it serve for 10 more seconds, then TiDB reports
-> itself unhealthy for
-> [`graceful-wait-before-shutdown`](https://docs.pingcap.com/tidb/stable/tidb-configuration-file#graceful-wait-before-shutdown-new-in-v50)
-> seconds, which is when TiProxy moves the sessions away, and then closes the connections left. The
-> default is `0`, which leaves TiProxy no time, so set it in the TiDB `config`, e.g.
-> `graceful-wait-before-shutdown = 15`. PingCAP recommends 10 seconds more than your longest
-> transaction; the pod is killed 30 seconds after it starts stopping, so values above 20 are cut short.
-> Changing the TiDB config restarts the TiDB pods once.
+**TiDB waits for TiProxy when it stops.** TiProxy moves a session only between transactions, and
+only while its TiDB node still runs. When a TiDB pod stops, TiDB Operator first lets it serve for
+10 more seconds, then TiDB reports itself unhealthy for
+[`graceful-wait-before-shutdown`](https://docs.pingcap.com/tidb/stable/tidb-configuration-file#graceful-wait-before-shutdown-new-in-v50)
+seconds, which is when TiProxy moves the sessions away, and then closes the connections left. TiDB
+defaults it to `0`, which leaves TiProxy no time, so along with `SessionTokenSigning` the provider
+sets `graceful-wait-before-shutdown = 15` in the TiDB config. TiDB Operator kills a TiDB pod 30
+seconds after it starts stopping, so 15 leaves TiDB the last 5 seconds to close what is left.
+Set `graceful-wait-before-shutdown` in the TiDB `config` yourself to use another value (PingCAP
+recommends 10 seconds more than your longest transaction; values above 20 are cut short).
+
+The provider only adds the setting when TiDB restarts anyway: on an Instance created with TiProxy,
+and in the same step that turns on `SessionTokenSigning` on an existing one, so both land in one
+roll. Like the gates, it stays when TiProxy is turned off.
 
 ### Monitoring
 

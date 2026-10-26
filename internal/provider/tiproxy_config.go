@@ -30,12 +30,16 @@ func withOptionalClientCerts(cfg string) string {
 		return cfg
 	}
 	serverTLS["skip-ca"] = true
+	return encodeTOML(parsed, cfg)
+}
 
+// encodeTOML renders a parsed config, or returns fallback if it cannot.
+func encodeTOML(parsed map[string]any, fallback string) string {
 	var buf bytes.Buffer
 	enc := toml.NewEncoder(&buf)
 	enc.Indent = ""
 	if err := enc.Encode(parsed); err != nil {
-		return cfg
+		return fallback
 	}
 	return buf.String()
 }

@@ -630,3 +630,125 @@ func TestTiProxyMetricsEndpoints(t *testing.T) {
 		t.Errorf("tiproxy cluster certificate does not verify for the scrape's server name: %v", err)
 	}
 }
+
+// renderTiDBConfig runs the steps SyncTiDB takes to render the TiDB group's
+// config against the given existing objects.
+func renderTiDBConfig(t *testing.T, in *corev1alpha1.Instance, objs ...client.Object) string {
+	t.Helper()
+	c, _ := tiproxyContext(t, in, nil, objs...)
+	had, err := clusterHasSessionTokenSigning(c)
+	assertError(t, err, "")
+	built, err := buildCluster(c)
+	assertError(t, err, "")
+	g := buildTiDBGroup(c, in.Spec.Components[common.ComponentTiDB], "")
+	assertError(t, addTiDBGracefulWait(c, g, built, had), "")
+	return string(g.Spec.Template.Spec.Config)
+}
+
+func withTiDBConfig(in *corev1alpha1.Instance, cfg string) *corev1alpha1.Instance {
+	raw, _ := json.Marshal(map[string]string{"config": cfg})
+	comp := in.Spec.Components[common.ComponentTiDB]
+	comp.Parameters = &runtime.RawExtension{Raw: raw}
+	in.Spec.Components[common.ComponentTiDB] = comp
+	return in
+}
+
+func tidbGroupWithConfig(cfg string, features ...metav1alpha1.Feature) *tidbcorev1.TiDBGroup {
+	g := tidbGroupWithFeatures(features...)
+	g.Spec.Template.Spec.Config = tidbcorev1.ConfigFile(cfg)
+	return g
+}
+
+func TestTiDBGracefulWait(t *testing.T) {
+	const fm, sts = metav1alpha1.FeatureModification, metav1alpha1.SessionTokenSigning
+	const secret = "orders-session-token-signing-secret"
+	const wait = "graceful-wait-before-shutdown = 15"
+	tests := []struct {
+		name    string
+		in      *corev1alpha1.Instance
+		objs    []client.Object
+		want    string
+		wantNot string
+	}{
+		{name: "new cluster with tiproxy", in: withTiProxy(testInstance("8.5.2"), 2, ""), want: wait},
+		{name: "new cluster without tiproxy", in: testInstance("8.5.2"), wantNot: "graceful-wait"},
+		{name: "the user's value wins",
+			in:   withTiDBConfig(withTiProxy(testInstance("8.5.2"), 2, ""), "graceful-wait-before-shutdown = 5\n"),
+			want: "graceful-wait-before-shutdown = 5", wantNot: wait},
+		{name: "the user's other settings are kept",
+			in:   withTiDBConfig(withTiProxy(testInstance("8.5.2"), 2, ""), "[log]\nlevel = \"warn\"\n"),
+			want: `level = "warn"`},
+		{name: "existing cluster: not with FeatureModification alone",
+			in:      withTiProxy(testInstance("8.5.2"), 2, ""),
+			objs:    []client.Object{testCluster(), signingSecret(), tidbGroupWithFeatures(), tidbInstanceWithFeatures("orders-a")},
+			wantNot: "graceful-wait"},
+		{name: "existing cluster: not while waiting for the tidb instances",
+			in: withTiProxy(testInstance("8.5.2"), 2, ""),
+			objs: []client.Object{clusterWithGates("", fm), signingSecret(), tidbGroupWithFeatures(fm),
+				tidbInstanceWithFeatures("orders-a")},
+			wantNot: "graceful-wait"},
+		{name: "existing cluster: with SessionTokenSigning in the same pass",
+			in: withTiProxy(testInstance("8.5.2"), 2, ""),
+			objs: []client.Object{clusterWithGates("", fm), signingSecret(), tidbGroupWithFeatures(fm),
+				tidbInstanceWithFeatures("orders-a", fm)},
+			want: wait},
+		{name: "kept after tiproxy is turned off",
+			in:   withTiProxy(testInstance("8.5.2"), 0, ""),
+			objs: []client.Object{clusterWithGates(secret, fm, sts), tidbGroupWithConfig(wait+"\n", fm, sts)},
+			want: wait},
+		{name: "not added later to a group that signs without it",
+			in:      withTiProxy(testInstance("8.5.2"), 2, ""),
+			objs:    []client.Object{clusterWithGates(secret, fm, sts), tidbGroupWithConfig("", fm, sts)},
+			wantNot: "graceful-wait"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := renderTiDBConfig(t, tt.in, tt.objs...)
+			if tt.want != "" && !strings.Contains(got, tt.want) {
+				t.Errorf("tidb config %q does not contain %q", got, tt.want)
+			}
+			if tt.wantNot != "" && strings.Contains(got, tt.wantNot) {
+				t.Errorf("tidb config %q contains %q", got, tt.wantNot)
+			}
+		})
+	}
+}
+
+func TestSyncTiDBSetsGracefulWaitWithTiProxy(t *testing.T) {
+	pinRootPassword(t)
+	for _, tiproxy := range []int32{0, 2} {
+		in := withTiProxy(testInstance("8.5.2"), tiproxy, "")
+		scheme := runtime.NewScheme()
+		for _, install := range append([]func(*runtime.Scheme) error{corev1alpha1.AddToScheme, corev1.AddToScheme},
+			New().SchemeFuncs...) {
+			if err := install(scheme); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(in, testProviderWithTiProxy()).Build()
+		c := controller.NewContext(context.Background(), cl, in, common.ProviderName)
+		assertError(t, SyncTiDB(c), "")
+
+		g := &tidbcorev1.TiDBGroup{}
+		if err := cl.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "orders"}, g); err != nil {
+			t.Fatal(err)
+		}
+		got := strings.Contains(string(g.Spec.Template.Spec.Config), "graceful-wait-before-shutdown = 15")
+		if got != (tiproxy > 0) {
+			t.Errorf("tiproxy replicas %d: tidb config %q, graceful wait set = %v", tiproxy, g.Spec.Template.Spec.Config, got)
+		}
+	}
+}
+
+func TestWithTiDBGracefulWait(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"", "graceful-wait-before-shutdown = 15\n"},
+		{"graceful-wait-before-shutdown = 0\n", "graceful-wait-before-shutdown = 0\n"},
+		{"[log\n", "[log\n"},
+	}
+	for _, tt := range tests {
+		if got := withTiDBGracefulWait(tt.in); got != tt.want {
+			t.Errorf("withTiDBGracefulWait(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

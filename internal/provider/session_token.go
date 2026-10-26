@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/BurntSushi/toml"
+
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -147,4 +149,74 @@ func usesSessionTokenSigning(c *controller.Context, cluster *tidbcorev1.Cluster)
 	sec := cluster.Spec.Security
 	return sec != nil && sec.SessionTokenSigningCertKeyPair != nil &&
 		sec.SessionTokenSigningCertKeyPair.Name == sessionTokenSigningSecretName(c.Name())
+}
+
+// tidbGracefulWaitSeconds is how long a stopping TiDB reports itself unhealthy
+// before closing its connections, which is when TiProxy moves the sessions
+// away. TiDB Operator v2.0.1 gives a TiDB pod 30s to stop (terminationGrace-
+// PeriodSeconds = 10s preStop sleep + 15s + 5s); 15s leaves TiDB the last 5s
+// to close what is left.
+const (
+	tidbGracefulWaitKey     = "graceful-wait-before-shutdown"
+	tidbGracefulWaitSeconds = 15
+)
+
+// clusterHasSessionTokenSigning reports whether the Cluster, as it exists
+// before this pass, already has the SessionTokenSigning gate.
+func clusterHasSessionTokenSigning(c *controller.Context) (bool, error) {
+	cluster := &tidbcorev1.Cluster{}
+	found, err := c.Exists(cluster, c.Name())
+	if err != nil {
+		return false, fmt.Errorf("get cluster: %w", err)
+	}
+	return found && hasFeatureGate(cluster, metav1alpha1.SessionTokenSigning), nil
+}
+
+// addTiDBGracefulWait sets graceful-wait-before-shutdown in TiDB's config while
+// TiDB signs session tokens for TiProxy, unless the user's config sets it. A
+// config change rolls TiDB, so it is only added when TiDB rolls anyway: with a
+// new group, or in the pass that turns on SessionTokenSigning (the operator
+// holds the TiDB group until its features catch up with the Cluster, so both
+// changes land in one roll). Once in the group it stays, like the gates.
+func addTiDBGracefulWait(c *controller.Context, group *tidbcorev1.TiDBGroup, cluster *tidbcorev1.Cluster, hadSigning bool) error {
+	if !hasFeatureGate(cluster, metav1alpha1.SessionTokenSigning) {
+		return nil
+	}
+	if hadSigning {
+		existing := &tidbcorev1.TiDBGroup{}
+		found, err := c.Exists(existing, group.Name)
+		if err != nil {
+			return fmt.Errorf("get tidb group: %w", err)
+		}
+		if found && !configSets(string(existing.Spec.Template.Spec.Config), tidbGracefulWaitKey) {
+			return nil
+		}
+	}
+	group.Spec.Template.Spec.Config = tidbcorev1.ConfigFile(withTiDBGracefulWait(string(group.Spec.Template.Spec.Config)))
+	return nil
+}
+
+// withTiDBGracefulWait adds graceful-wait-before-shutdown to a TiDB config that
+// does not set it. Config that does not parse is returned unchanged for the
+// operator to report.
+func withTiDBGracefulWait(cfg string) string {
+	parsed := map[string]any{}
+	if _, err := toml.Decode(cfg, &parsed); err != nil {
+		return cfg
+	}
+	if _, set := parsed[tidbGracefulWaitKey]; set {
+		return cfg
+	}
+	parsed[tidbGracefulWaitKey] = tidbGracefulWaitSeconds
+	return encodeTOML(parsed, cfg)
+}
+
+// configSets reports whether a TOML config sets a top-level key.
+func configSets(cfg, key string) bool {
+	parsed := map[string]any{}
+	if _, err := toml.Decode(cfg, &parsed); err != nil {
+		return false
+	}
+	_, set := parsed[key]
+	return set
 }

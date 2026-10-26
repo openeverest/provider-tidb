@@ -66,6 +66,12 @@ func SyncTiDB(c *controller.Context) error {
 	// manages the fields this provider sets, so the operator's own fields —
 	// including its finalizer — stay intact and deleting the Instance triggers
 	// the operator's ordered Cluster teardown.
+	// Whether TiDB already signed session tokens before this pass, which decides
+	// if TiDB's graceful shutdown wait may still be added (addTiDBGracefulWait).
+	hadSessionTokenSigning, err := clusterHasSessionTokenSigning(c)
+	if err != nil {
+		return err
+	}
 	cluster, err := buildCluster(c)
 	if err != nil {
 		return err
@@ -95,7 +101,12 @@ func SyncTiDB(c *controller.Context) error {
 	}
 
 	tidb := comps[common.ComponentTiDB]
-	if err := applyOwnedByCluster(c, owner, buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))); err != nil {
+	tidbGroup := buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))
+	// The Cluster as applied, not the re-read owner: the cache may not show the new gates yet.
+	if err := addTiDBGracefulWait(c, tidbGroup, cluster, hadSessionTokenSigning); err != nil {
+		return err
+	}
+	if err := applyOwnedByCluster(c, owner, tidbGroup); err != nil {
 		return err
 	}
 
