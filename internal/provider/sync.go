@@ -84,7 +84,12 @@ func SyncTiDB(c *controller.Context) error {
 	}
 
 	pd := comps[common.ComponentPD]
-	if err := applyOwnedByCluster(c, owner, buildPDGroup(c, pd, resolveImage(providerSpec, common.ComponentPD, pd))); err != nil {
+	pdImage := resolveImage(providerSpec, common.ComponentPD, pd)
+	pdGroup := buildPDGroup(c, pd, pdImage)
+	if err := addPDDNSWait(c, pdGroup, pdImage); err != nil {
+		return err
+	}
+	if err := applyOwnedByCluster(c, owner, pdGroup); err != nil {
 		return err
 	}
 
