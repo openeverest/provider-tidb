@@ -3,8 +3,11 @@ package provider
 
 import (
 	"context"
+	"fmt"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -63,11 +66,13 @@ func New() *Provider {
 				controller.WatchExternal(&tidbcorev1.TiKVGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
 				controller.WatchExternal(&tidbcorev1.TiDBGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
 				controller.WatchExternal(&tidbcorev1.TiFlashGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
+				controller.WatchExternal(&tidbcorev1.TiProxyGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
 				// Instances are owned by their group, not the Instance, so map them back by cluster label.
 				controller.WatchExternal(&tidbcorev1.PD{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				controller.WatchExternal(&tidbcorev1.TiKV{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				controller.WatchExternal(&tidbcorev1.TiDB{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				controller.WatchExternal(&tidbcorev1.TiFlash{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
+				controller.WatchExternal(&tidbcorev1.TiProxy{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				// Re-reconcile an Instance when its seeding Restore (.spec.dataSource) changes.
 				controller.WatchExternal(&backupv1alpha1.Restore{}, handler.EnqueueRequestsFromMapFunc(instanceForRestore)),
 			},
@@ -116,9 +121,45 @@ func (p *Provider) Status(c *controller.Context) (controller.Status, error) {
 	return StatusTiDB(c)
 }
 
-// Cleanup deletes provider-managed resources. The Cluster and component groups
-// carry owner references to the Instance, so they are garbage collected
-// automatically; no explicit cleanup is required.
-func (p *Provider) Cleanup(_ *controller.Context) error {
+// Cleanup deletes the TiDB Cluster and holds the Instance until TiDB Operator
+// has torn it down. The operator finds a cluster's groups and members by name,
+// so an Instance created again under the same name while the old cluster was
+// still being torn down had its new TiKV taken offline by that teardown.
+func (p *Provider) Cleanup(c *controller.Context) error {
+	cluster := &tidbcorev1.Cluster{}
+	found, err := c.Exists(cluster, c.Name())
+	if err != nil {
+		return fmt.Errorf("get cluster: %w", err)
+	}
+	left := 0
+	if found {
+		left++
+		if cluster.DeletionTimestamp.IsZero() {
+			if err := c.Delete(cluster); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("delete cluster: %w", err)
+			}
+		}
+	}
+	for _, group := range []client.Object{&tidbcorev1.PDGroup{}, &tidbcorev1.TiKVGroup{}, &tidbcorev1.TiDBGroup{},
+		&tidbcorev1.TiFlashGroup{}, &tidbcorev1.TiProxyGroup{}} {
+		found, err := c.Exists(group, c.Name())
+		if err != nil {
+			return fmt.Errorf("get %T: %w", group, err)
+		}
+		if found {
+			left++
+		}
+	}
+	inCluster := client.MatchingLabels{tidbcorev1.LabelKeyCluster: c.Name()}
+	for _, list := range []client.ObjectList{&tidbcorev1.PDList{}, &tidbcorev1.TiKVList{}, &tidbcorev1.TiDBList{},
+		&tidbcorev1.TiFlashList{}, &tidbcorev1.TiProxyList{}} {
+		if err := c.List(list, inCluster); err != nil {
+			return fmt.Errorf("list %T: %w", list, err)
+		}
+		left += meta.LenList(list)
+	}
+	if left > 0 {
+		return controller.WaitFor(fmt.Sprintf("waiting for TiDB Operator to tear down cluster %q (%d objects left)", c.Name(), left))
+	}
 	return nil
 }

@@ -31,3 +31,9 @@ type TiflashParameters struct {
 	// Config is the inline TOML configuration file for TiFlash.
 	Config string `json:"config,omitempty"`
 }
+
+// TiproxyParameters defines the parameters for tiproxy (connection proxy) components.
+type TiproxyParameters struct {
+	// Config is the inline TOML configuration file for TiProxy.
+	Config string `json:"config,omitempty"`
+}

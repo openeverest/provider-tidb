@@ -45,14 +45,15 @@ func monitoringTopology(prometheus *cluster.Prometheus, vm *cluster.VictoriaMetr
 }
 
 // scrapeTarget is what one endpoint of a scrape object reads.
-type scrapeTarget struct{ port, keep string }
+type scrapeTarget struct{ port, keep, path string }
 
 var wantScrapeTargets = []scrapeTarget{
-	{tidbcorev1.PDPortNameClient, "pd"},
-	{tidbcorev1.TiKVPortNameStatus, "tikv"},
-	{tidbcorev1.TiDBPortNameStatus, "tidb"},
-	{tidbcorev1.TiFlashPortNameMetrics, "tiflash"},
-	{tidbcorev1.TiFlashPortNameProxyStatus, "tiflash"},
+	{tidbcorev1.PDPortNameClient, "pd", "/metrics"},
+	{tidbcorev1.TiKVPortNameStatus, "tikv", "/metrics"},
+	{tidbcorev1.TiDBPortNameStatus, "tidb", "/metrics"},
+	{tidbcorev1.TiFlashPortNameMetrics, "tiflash", "/metrics"},
+	{tidbcorev1.TiFlashPortNameProxyStatus, "tiflash", "/metrics"},
+	{tidbcorev1.TiProxyPortNameAPI, "tiproxy", "/api/metrics"},
 }
 
 func wantScrapeLabels(release string) map[string]string {
@@ -92,14 +93,14 @@ func TestBuildPodMonitor(t *testing.T) {
 	}
 	var got []scrapeTarget
 	for _, ep := range pm.Spec.PodMetricsEndpoints {
-		if ep.Path != "/metrics" || ep.Interval != "30s" {
-			t.Errorf("endpoint %s: path %q interval %q", ptr.Deref(ep.Port, ""), ep.Path, ep.Interval)
+		if ep.Interval != "30s" {
+			t.Errorf("endpoint %s: interval %q", ptr.Deref(ep.Port, ""), ep.Interval)
 		}
 		if len(ep.RelabelConfigs) != 1 || ep.RelabelConfigs[0].Action != "keep" ||
 			!reflect.DeepEqual(ep.RelabelConfigs[0].SourceLabels, []monitoringv1.LabelName{componentPodLabelMeta}) {
 			t.Fatalf("endpoint %s: relabelings = %+v", ptr.Deref(ep.Port, ""), ep.RelabelConfigs)
 		}
-		got = append(got, scrapeTarget{ptr.Deref(ep.Port, ""), ep.RelabelConfigs[0].Regex})
+		got = append(got, scrapeTarget{ptr.Deref(ep.Port, ""), ep.RelabelConfigs[0].Regex, ep.Path})
 	}
 	if !reflect.DeepEqual(got, wantScrapeTargets) {
 		t.Errorf("endpoints = %v, want %v", got, wantScrapeTargets)
@@ -124,15 +125,15 @@ func TestBuildVMPodScrape(t *testing.T) {
 	}
 	var got []scrapeTarget
 	for _, ep := range ps.Spec.PodMetricsEndpoints {
-		if ep.Path != "/metrics" || ep.Interval != "30s" {
-			t.Errorf("endpoint %s: path %q interval %q", ptr.Deref(ep.Port, ""), ep.Path, ep.Interval)
+		if ep.Interval != "30s" {
+			t.Errorf("endpoint %s: interval %q", ptr.Deref(ep.Port, ""), ep.Interval)
 		}
 		if len(ep.RelabelConfigs) != 1 || ep.RelabelConfigs[0].Action != "keep" ||
 			!reflect.DeepEqual(ep.RelabelConfigs[0].SourceLabels, []string{componentPodLabelMeta}) ||
 			len(ep.RelabelConfigs[0].Regex) != 1 {
 			t.Fatalf("endpoint %s: relabelings = %+v", ptr.Deref(ep.Port, ""), ep.RelabelConfigs)
 		}
-		got = append(got, scrapeTarget{ptr.Deref(ep.Port, ""), ep.RelabelConfigs[0].Regex[0]})
+		got = append(got, scrapeTarget{ptr.Deref(ep.Port, ""), ep.RelabelConfigs[0].Regex[0], ep.Path})
 	}
 	if !reflect.DeepEqual(got, wantScrapeTargets) {
 		t.Errorf("endpoints = %v, want %v", got, wantScrapeTargets)

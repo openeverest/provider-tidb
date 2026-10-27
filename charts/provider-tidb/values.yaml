@@ -196,7 +196,8 @@ presets:
           resources:
             limits: {cpu: "1", memory: 1Gi}
   # Highly available transactional cluster: three PD and TiKV nodes so the
-  # cluster survives losing one, and two SQL nodes behind the TiDB service.
+  # cluster survives losing one, and two SQL nodes behind two TiProxy nodes,
+  # which balance sessions across TiDB and keep them open while TiDB restarts.
   - name: standard
     enabled: true
     spec:
@@ -227,8 +228,15 @@ presets:
           replicas: 2
           resources:
             limits: {cpu: "4", memory: 8Gi}
+        tiproxy:
+          type: tiproxy
+          replicas: 2
+          resources:
+            limits: {cpu: "2", memory: 2Gi}
   # The standard cluster plus two TiFlash nodes, so tables can keep two
-  # columnar replicas for analytical queries (HTAP).
+  # columnar replicas for analytical queries (HTAP). TiFlash runs the joins and
+  # aggregations of those queries in memory: with 16Gi it ran out of memory under
+  # CH-benCHmark at 100 warehouses with four analytical clients; 32Gi did not.
   - name: analytics
     enabled: true
     spec:
@@ -259,11 +267,16 @@ presets:
           replicas: 2
           resources:
             limits: {cpu: "4", memory: 8Gi}
+        tiproxy:
+          type: tiproxy
+          replicas: 2
+          resources:
+            limits: {cpu: "2", memory: 2Gi}
         tiflash:
           type: tiflash
           replicas: 2
           resources:
-            limits: {cpu: "4", memory: 16Gi}
+            limits: {cpu: "4", memory: 32Gi}
           storage:
             size: 100Gi
 

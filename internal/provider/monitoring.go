@@ -27,6 +27,8 @@ import (
 
 const (
 	metricsPath = "/metrics"
+	// tiproxyMetricsPath is where TiProxy documents its metrics on the API port.
+	tiproxyMetricsPath = "/api/metrics"
 
 	podMonitorSuffix  = "-metrics"
 	vmPodScrapeSuffix = "-vm-metrics"
@@ -47,14 +49,16 @@ const (
 type metricsEndpoint struct {
 	port      string
 	component string
+	path      string
 }
 
 var metricsEndpoints = []metricsEndpoint{
-	{tidbcorev1.PDPortNameClient, common.ComponentPD},
-	{tidbcorev1.TiKVPortNameStatus, common.ComponentTiKV},
-	{tidbcorev1.TiDBPortNameStatus, common.ComponentTiDB},
-	{tidbcorev1.TiFlashPortNameMetrics, common.ComponentTiFlash},
-	{tidbcorev1.TiFlashPortNameProxyStatus, common.ComponentTiFlash},
+	{tidbcorev1.PDPortNameClient, common.ComponentPD, metricsPath},
+	{tidbcorev1.TiKVPortNameStatus, common.ComponentTiKV, metricsPath},
+	{tidbcorev1.TiDBPortNameStatus, common.ComponentTiDB, metricsPath},
+	{tidbcorev1.TiFlashPortNameMetrics, common.ComponentTiFlash, metricsPath},
+	{tidbcorev1.TiFlashPortNameProxyStatus, common.ComponentTiFlash, metricsPath},
+	{tidbcorev1.TiProxyPortNameAPI, common.ComponentTiProxy, tiproxyMetricsPath},
 }
 
 // metricsTLS is how a scrape reaches the metrics endpoints of a cluster with
@@ -274,7 +278,7 @@ func buildPodMonitor(c *controller.Context, settings scrapeSettings, defaults ma
 	for _, e := range metricsEndpoints {
 		endpoint := monitoringv1.PodMetricsEndpoint{
 			Port:     ptr.To(e.port),
-			Path:     metricsPath,
+			Path:     e.path,
 			Interval: monitoringv1.Duration(settings.interval),
 			RelabelConfigs: []monitoringv1.RelabelConfig{{
 				Action:       "keep",
@@ -310,7 +314,7 @@ func buildVMPodScrape(c *controller.Context, settings scrapeSettings, defaults m
 		endpoint := vmv1beta1.PodMetricsEndpoint{
 			Port: ptr.To(e.port),
 			EndpointScrapeParams: vmv1beta1.EndpointScrapeParams{
-				Path:     metricsPath,
+				Path:     e.path,
 				Interval: settings.interval,
 			},
 			EndpointRelabelings: vmv1beta1.EndpointRelabelings{

@@ -33,6 +33,7 @@ const (
 	defaultTiKVReplicas    int32 = 3
 	defaultTiDBReplicas    int32 = 2
 	defaultTiFlashReplicas int32 = 1
+	defaultTiProxyReplicas int32 = 2
 )
 
 var defaultVolumeSize = resource.MustParse("10Gi")
@@ -65,6 +66,12 @@ func SyncTiDB(c *controller.Context) error {
 	// manages the fields this provider sets, so the operator's own fields —
 	// including its finalizer — stay intact and deleting the Instance triggers
 	// the operator's ordered Cluster teardown.
+	// Whether TiDB already signed session tokens before this pass, which decides
+	// if TiDB's graceful shutdown wait may still be added (addTiDBGracefulWait).
+	hadSessionTokenSigning, err := clusterHasSessionTokenSigning(c)
+	if err != nil {
+		return err
+	}
 	cluster, err := buildCluster(c)
 	if err != nil {
 		return err
@@ -84,7 +91,12 @@ func SyncTiDB(c *controller.Context) error {
 	}
 
 	pd := comps[common.ComponentPD]
-	if err := applyOwnedByCluster(c, owner, buildPDGroup(c, pd, resolveImage(providerSpec, common.ComponentPD, pd))); err != nil {
+	pdImage := resolveImage(providerSpec, common.ComponentPD, pd)
+	pdGroup := buildPDGroup(c, pd, pdImage)
+	if err := addPDDNSWait(c, pdGroup, pdImage); err != nil {
+		return err
+	}
+	if err := applyOwnedByCluster(c, owner, pdGroup); err != nil {
 		return err
 	}
 
@@ -94,11 +106,20 @@ func SyncTiDB(c *controller.Context) error {
 	}
 
 	tidb := comps[common.ComponentTiDB]
-	if err := applyOwnedByCluster(c, owner, buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))); err != nil {
+	tidbGroup := buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))
+	// The Cluster as applied, not the re-read owner: the cache may not show the new gates yet.
+	if err := addTiDBGracefulWait(c, tidbGroup, cluster, hadSessionTokenSigning); err != nil {
+		return err
+	}
+	if err := applyOwnedByCluster(c, owner, tidbGroup); err != nil {
 		return err
 	}
 
 	if err := syncTiFlash(c, providerSpec, owner); err != nil {
+		return err
+	}
+
+	if err := syncTiProxy(c, providerSpec, owner); err != nil {
 		return err
 	}
 
@@ -134,6 +155,33 @@ func syncTiFlash(c *controller.Context, providerSpec *corev1alpha1.ProviderSpec,
 // component is present and does not ask for zero replicas.
 func enabledTiFlash(comps map[string]corev1alpha1.ComponentSpec) (corev1alpha1.ComponentSpec, bool) {
 	comp, ok := comps[common.ComponentTiFlash]
+	if !ok || (comp.Replicas != nil && *comp.Replicas == 0) {
+		return corev1alpha1.ComponentSpec{}, false
+	}
+	return comp, true
+}
+
+// syncTiProxy applies the TiProxy group while TiProxy is enabled and deletes it
+// once disabled.
+func syncTiProxy(c *controller.Context, providerSpec *corev1alpha1.ProviderSpec, owner *tidbcorev1.Cluster) error {
+	if tiproxy, ok := enabledTiProxy(c.Instance().Spec.Components); ok {
+		return applyOwnedByCluster(c, owner, buildTiProxyGroup(c, tiproxy, resolveImage(providerSpec, common.ComponentTiProxy, tiproxy)))
+	}
+	group := &tidbcorev1.TiProxyGroup{}
+	found, err := c.Exists(group, c.Name())
+	if err != nil {
+		return fmt.Errorf("get tiproxy group: %w", err)
+	}
+	if !found || !group.DeletionTimestamp.IsZero() {
+		return nil
+	}
+	return c.Delete(group)
+}
+
+// enabledTiProxy returns the TiProxy component when the Instance runs it: the
+// component is present and does not ask for zero replicas.
+func enabledTiProxy(comps map[string]corev1alpha1.ComponentSpec) (corev1alpha1.ComponentSpec, bool) {
+	comp, ok := comps[common.ComponentTiProxy]
 	if !ok || (comp.Replicas != nil && *comp.Replicas == 0) {
 		return corev1alpha1.ComponentSpec{}, false
 	}
@@ -334,6 +382,7 @@ func buildCluster(c *controller.Context) (*tidbcorev1.Cluster, error) {
 		if source := tlsSource(settings); source != "" {
 			cluster.Annotations = map[string]string{tlsSourceAnnotation: source}
 		}
+		cluster.Spec.FeatureGates, cluster.Spec.Security = newClusterSessionTokenSigning(c)
 	case err != nil:
 		return nil, err
 	default:
@@ -341,6 +390,10 @@ func buildCluster(c *controller.Context) (*tidbcorev1.Cluster, error) {
 		cluster.Spec.TLSCluster = existing.Spec.TLSCluster
 		if source := existing.Annotations[tlsSourceAnnotation]; source != "" {
 			cluster.Annotations = map[string]string{tlsSourceAnnotation: source}
+		}
+		// Feature gates are frozen once set, so they change in steps (session_token.go).
+		if cluster.Spec.FeatureGates, cluster.Spec.Security, err = existingClusterSessionTokenSigning(c, existing); err != nil {
+			return nil, err
 		}
 	}
 	return cluster, nil
@@ -437,6 +490,40 @@ func buildTiFlashGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, i
 			Cluster:  clusterRef(c),
 			Replicas: replicasOrDefault(comp.Replicas, defaultTiFlashReplicas),
 			Template: tidbcorev1.TiFlashTemplate{Spec: tmpl},
+		},
+	}
+}
+
+func buildTiProxyGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, image string) *tidbcorev1.TiProxyGroup {
+	// TiProxy is stateless: no data volume.
+	tmpl := tidbcorev1.TiProxyTemplateSpec{
+		Version:   comp.Version,
+		Resources: toResources(comp.Resources),
+		Overlay:   podOverlay(c, common.ComponentTiProxy, comp.SchedulingPolicy),
+	}
+	if image != "" {
+		tmpl.Image = &image
+	}
+	cfg := componentConfig(c, comp)
+	// TiProxy serves MySQL clients with its own certificate and reaches TiDB's
+	// MySQL port over TLS too; tls.cluster needs nothing here, the operator
+	// mounts <group>-tiproxy-cluster-secret by itself.
+	if tlsSettings(c).Client {
+		tmpl.Security = &tidbcorev1.TiProxySecurity{TLS: &tidbcorev1.TiProxyTLS{
+			MySQL:   &tidbcorev1.TLS{Enabled: true},
+			Backend: &tidbcorev1.ClientTLS{Enabled: true},
+		}}
+		cfg = withOptionalClientCerts(cfg)
+	}
+	if cfg != "" {
+		tmpl.Config = tidbcorev1.ConfigFile(cfg)
+	}
+	return &tidbcorev1.TiProxyGroup{
+		ObjectMeta: c.ObjectMeta(c.Name()),
+		Spec: tidbcorev1.TiProxyGroupSpec{
+			Cluster:  clusterRef(c),
+			Replicas: replicasOrDefault(comp.Replicas, defaultTiProxyReplicas),
+			Template: tidbcorev1.TiProxyTemplate{Spec: tmpl},
 		},
 	}
 }
