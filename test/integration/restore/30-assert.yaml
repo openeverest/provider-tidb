@@ -11,7 +11,7 @@ spec:
     cluster: bkp
     clusterNamespace: ($namespace)
   s3:
-    provider: aws
+    provider: other
     bucket: test-bucket
     region: us-east-1
     endpoint: http://minio.storage:9000
