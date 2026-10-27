@@ -187,7 +187,7 @@ presets:
           type: tikv
           replicas: 1
           resources:
-            limits: {cpu: "1", memory: 2Gi}
+            limits: {cpu: "1", memory: 4Gi}
           storage:
             size: 10Gi
         tidb:

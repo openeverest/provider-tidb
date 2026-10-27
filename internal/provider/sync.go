@@ -432,7 +432,11 @@ func buildTiKVGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, imag
 	if image != "" {
 		tmpl.Image = &image
 	}
-	if cfg := componentConfig(c, comp); cfg != "" {
+	var limits corev1.ResourceList
+	if comp.Resources != nil {
+		limits = comp.Resources.Limits
+	}
+	if cfg := tikvConfig(componentConfig(c, comp), limits, tmpl.Volumes[0].Storage); cfg != "" {
 		tmpl.Config = tidbcorev1.ConfigFile(cfg)
 	}
 	return &tidbcorev1.TiKVGroup{

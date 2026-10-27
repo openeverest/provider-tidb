@@ -292,7 +292,7 @@ The chart ships `InstancePreset`s, so the UI can create a working cluster in one
 
 | Preset | PD | TiKV | TiDB | TiFlash | TiProxy | Use it for |
 |---|---|---|---|---|---|---|
-| `tidb-dev` | 1 | 1 | 1 | — | — | A laptop or CI: the smallest cluster that runs (about 4 GiB) |
+| `tidb-dev` | 1 | 1 | 1 | — | — | A laptop or CI: the smallest cluster that runs (about 6 GiB) |
 | `tidb-standard` | 3 | 3 | 2 | — | 2 | A highly available transactional database |
 | `tidb-analytics` | 3 | 3 | 2 | 2 | 2 | Transactions plus analytics on the same data |
 
@@ -537,6 +537,24 @@ or `v1.3.2` via `spec.components.tiproxy.version`); the user selects one via `In
   (`kubectl get provider tidb -o yaml`). The API server and the UI validate user input against
   these schemas.
 
+### TiKV memory and disk
+
+TiKV needs a memory limit of at least **4Gi**; the provider rejects a smaller one on a new Instance
+or when the limit changes. About 2.5 GiB of it is TiKV's own runtime: at startup TiKV caches its
+binary's debug info so it can print a stack trace if it panics, and keeps it for the life of the
+process. TiKV doesn't count that when it sizes its caches from the limit (block cache 45%,
+`memory-usage-limit` 75%), so with a small limit it is OOM-killed under light load.
+
+For a limit below 8Gi the provider therefore sizes TiKV's memory from what remains after 2.5 GiB,
+with TiKV's own ratios: `storage.block-cache.capacity` 45%, `rocksdb.write-buffer-limit` (all
+memtables) 15%, and `memory-usage-limit` 2.5 GiB plus 75%. From 8Gi up TiKV's defaults leave enough
+room and are used as they are. To size TiKV yourself, set any of these three keys in
+`spec.components.tikv.parameters.config`; the provider then sets none of them.
+
+TiKV keeps `max(5% of the disk, storage.reserve-space)` free and rejects writes (`tikv disk
+full`) once less is available. `reserve-space` defaults to 5 GiB, half of a 10Gi volume, so for
+TiKV volumes below 100Gi the provider sets it to 1 GiB unless your config sets it.
+
 ## Development
 
 Requires Go (see [go.mod](go.mod)), Docker, Helm, kubectl, and a Kubernetes cluster you can
@@ -605,6 +623,7 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 | `Instance` turns `Failed` right after an edit, with no message | The provider rejected the change. The reason is in the provider logs (`Validation failed`); see [Known issues](#known-issues). Typical causes: shrinking storage, downgrading or reordering versions, scaling TiKV below PD's `max-replicas`, changing TLS after creation. Revert the change to return to `Ready` |
 | `Backup` or `Restore` stays `Running` | `kubectl get jobs` in the Instance's namespace and the BR job's pod logs; the BR `Backup`/`Restore` (`backups.br.pingcap.com`) conditions carry the reason |
 | TiProxy runs but does not migrate sessions | `kubectl get cluster.core.pingcap.com <instance> -o jsonpath='{.spec.featureGates}'` must list `SessionTokenSigning`. On an existing Instance the provider adds it only once every TiDB instance lists `FeatureModification` (`kubectl get tidb -o jsonpath='{.items[*].spec.features}'`); see [TiProxy](#tiproxy) |
+| TiKV pods restart with `OOMKilled`, or writes fail with `tikv disk full` early | The TiKV memory limit or volume is too small; see [TiKV memory and disk](#tikv-memory-and-disk) |
 | Clients cannot log in after a restore | The restored data carries the backed-up cluster's root password; see [Usage](#usage). The Restore's message says when that password is unknown |
 
 ## Known issues
