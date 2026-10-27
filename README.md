@@ -272,6 +272,15 @@ The provider generates a random `root` password on first bootstrap (via the oper
 mysql -h my-tidb-tidb.<namespace> -P 4000 -u root -p"$(kubectl get secret my-tidb-conn -o jsonpath='{.data.password}' | base64 -d)"
 ```
 
+A BR restore brings back the backed-up cluster's users and grants (`mysql.user` and the other
+privilege tables), root's password included. So the connection Secret keeps working, each backup
+records the root password of the Instance it was taken from, and after a restore the restored
+Instance's connection Secret switches to that password. A clone made from another Instance's backup
+therefore has the source's root password; change it with `ALTER USER` and update
+`<instance>-tidb-root` if they should differ. For backups taken by an earlier provider version the
+source Instance's current root password is used, and if that Instance is gone the Restore's message
+says the password is unknown.
+
 > [!NOTE]
 > Each component group expands into one instance resource per replica — e.g. `spec.components.tidb.replicas: 2`
 > yields two `TiDB` resources (`kubectl get tidb`) and two pods, all belonging to one `TiDBGroup`
@@ -596,16 +605,13 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 | `Instance` turns `Failed` right after an edit, with no message | The provider rejected the change. The reason is in the provider logs (`Validation failed`); see [Known issues](#known-issues). Typical causes: shrinking storage, downgrading or reordering versions, scaling TiKV below PD's `max-replicas`, changing TLS after creation. Revert the change to return to `Ready` |
 | `Backup` or `Restore` stays `Running` | `kubectl get jobs` in the Instance's namespace and the BR job's pod logs; the BR `Backup`/`Restore` (`backups.br.pingcap.com`) conditions carry the reason |
 | TiProxy runs but does not migrate sessions | `kubectl get cluster.core.pingcap.com <instance> -o jsonpath='{.spec.featureGates}'` must list `SessionTokenSigning`. On an existing Instance the provider adds it only once every TiDB instance lists `FeatureModification` (`kubectl get tidb -o jsonpath='{.items[*].spec.features}'`); see [TiProxy](#tiproxy) |
-| Clients cannot log in after a restore | See [Known issues](#known-issues) |
+| Clients cannot log in after a restore | The restored data carries the backed-up cluster's root password; see [Usage](#usage). The Restore's message says when that password is unknown |
 
 ## Known issues
 
 - **Rejected changes show no reason.** When `Validate` rejects a change the `Instance` turns
   `Failed` without a message; the reason is only in the provider logs. Fixed in the OpenEverest
   provider runtime (openeverest/openeverest#3346) and picked up once a release includes it.
-- **Root password after a restore** ([#64](https://github.com/openeverest/provider-tidb/issues/64)).
-  A restore brings back the backed-up `mysql.user`, so after restoring another Instance's backup the
-  root password is that Instance's, not the one in `<instance>-conn`.
 - **No certificate rotation** ([#66](https://github.com/openeverest/provider-tidb/issues/66)).
   Certificates are issued for ten years and not renewed (see [Security](#security)).
 

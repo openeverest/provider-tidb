@@ -76,6 +76,10 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 		return controller.BackupExecutionStatus{}, err
 	}
 
+	if err := recordBackupRootPassword(c, backup); err != nil {
+		return controller.BackupExecutionStatus{}, err
+	}
+
 	brBackup := &tidbbrv1.Backup{
 		ObjectMeta: metav1.ObjectMeta{Name: backup.Name, Namespace: backup.Namespace},
 	}
@@ -232,7 +236,23 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 		return controller.RestoreExecutionStatus{}, fmt.Errorf("create or update BR restore: %w", err)
 	}
 
-	return brRestoreExecutionStatus(brRestore), nil
+	exec := brRestoreExecutionStatus(brRestore)
+	if exec.State == backupv1alpha1.RestoreStateSucceeded {
+		// The restore brought back the source's mysql.user, root password included.
+		completed := brRestore.Status.TimeCompleted.Time
+		if completed.IsZero() {
+			completed = restore.CreationTimestamp.Time
+		}
+		known, err := adoptRestoredRootPassword(c, restore, srcBackup, completed)
+		if err != nil {
+			return controller.RestoreExecutionStatus{}, err
+		}
+		if !known {
+			exec.Message = fmt.Sprintf("The root password of backup %q is unknown, so the connection Secret may not log in: "+
+				"root now has the password the backed-up cluster had", srcBackup.Name)
+		}
+	}
+	return exec, nil
 }
 
 // CleanupRestore deletes the BR Restore CR.

@@ -4,12 +4,15 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	backupv1alpha1 "github.com/openeverest/openeverest/v2/api/backup/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 )
 
@@ -18,6 +21,12 @@ const (
 	rootPasswordKey       = "password"
 	rootPasswordLength    = 24
 	bootstrapSQLConfigKey = "bootstrap-sql"
+
+	// annotationRootFromRestore and annotationRootRestoredAt record on the root
+	// password Secret which restore its password was adopted from, so an older
+	// restore that reconciles again cannot overwrite a newer one.
+	annotationRootFromRestore = "tidb.openeverest.io/root-password-from-restore"
+	annotationRootRestoredAt  = "tidb.openeverest.io/root-password-restored-at"
 )
 
 // rootSecretName is the Secret holding the generated root password.
@@ -97,6 +106,100 @@ func readRootPassword(c *controller.Context) string {
 		return ""
 	}
 	return string(secret.Data[rootPasswordKey])
+}
+
+// backupRootSecretName is the Secret, owned by a Backup, that holds the root
+// password of the backed-up Instance at the time the backup was taken.
+func backupRootSecretName(backup string) string {
+	return backup + "-tidb-root"
+}
+
+// recordBackupRootPassword stores the Instance's root password next to a
+// backup. A BR snapshot includes mysql.user, so whoever restores it gets this
+// password for root. The Secret is written once, when the backup starts.
+func recordBackupRootPassword(c *controller.Context, backup *backupv1alpha1.Backup) error {
+	err := c.Get(&corev1.Secret{}, backupRootSecretName(backup.Name))
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("reading backup root password secret: %w", err)
+	}
+	password := readRootPassword(c)
+	if password == "" {
+		return nil
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      backupRootSecretName(backup.Name),
+			Namespace: backup.Namespace,
+			Labels:    c.ObjectMeta("").Labels,
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{rootPasswordKey: []byte(password)},
+	}
+	if err := controllerutil.SetControllerReference(backup, secret, c.Client().Scheme()); err != nil {
+		return fmt.Errorf("owning backup root password secret: %w", err)
+	}
+	if err := c.Client().Create(c.Context(), secret); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("creating backup root password secret: %w", err)
+	}
+	return nil
+}
+
+// restoredRootPassword returns the root password the data of a backup carries:
+// the one recorded with the backup or, for backups taken before that was
+// recorded, the source Instance's current one. Empty if neither is known.
+func restoredRootPassword(c *controller.Context, backup *backupv1alpha1.Backup) (string, error) {
+	names := []string{backupRootSecretName(backup.Name)}
+	if ref := backup.Spec.Origin.InstanceRef; ref != nil {
+		names = append(names, rootSecretName(ref.Name))
+	}
+	for _, name := range names {
+		secret := &corev1.Secret{}
+		if err := c.Get(secret, name); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return "", fmt.Errorf("reading secret %s: %w", name, err)
+		}
+		if pw := secret.Data[rootPasswordKey]; len(pw) > 0 {
+			return string(pw), nil
+		}
+	}
+	return "", nil
+}
+
+// adoptRestoredRootPassword makes the Instance's root password Secret, and so
+// its connection Secret, hold the root password the restored mysql.user has.
+// Restores are ordered by completion time: one that completed no later than
+// the restore the password last came from leaves it alone. It reports false
+// when the backup's root password is unknown.
+func adoptRestoredRootPassword(c *controller.Context, restore *backupv1alpha1.Restore, backup *backupv1alpha1.Backup, completed time.Time) (bool, error) {
+	password, err := restoredRootPassword(c, backup)
+	if err != nil || password == "" {
+		return false, err
+	}
+	current := &corev1.Secret{}
+	if err := c.Get(current, rootSecretName(c.Name())); err != nil && !apierrors.IsNotFound(err) {
+		return false, fmt.Errorf("reading root password secret: %w", err)
+	}
+	if prev, perr := time.Parse(time.RFC3339, current.Annotations[annotationRootRestoredAt]); perr == nil && !completed.Truncate(time.Second).After(prev) {
+		return true, nil
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: c.ObjectMeta(rootSecretName(c.Name())),
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{rootPasswordKey: []byte(password)},
+	}
+	secret.Annotations = map[string]string{
+		annotationRootFromRestore: restore.Name,
+		annotationRootRestoredAt:  completed.UTC().Format(time.RFC3339),
+	}
+	if err := c.Apply(secret); err != nil {
+		return false, fmt.Errorf("updating root password secret: %w", err)
+	}
+	return true, nil
 }
 
 // buildBootstrapSQLConfigMap builds the ConfigMap TiDB runs once at first
