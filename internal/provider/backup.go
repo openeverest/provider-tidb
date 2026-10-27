@@ -2,6 +2,8 @@ package provider
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -19,6 +21,27 @@ import (
 // brSecretName is the BR-format credentials Secret derived from the OpenEverest
 // BackupStorage credentials (BR expects access_key/secret_key keys).
 func brSecretName(backupName string) string { return backupName + "-br-s3" }
+
+// s3CompatibleProvider is BR's provider for S3-compatible storage other than
+// AWS. TiDB Operator passes it to BR as is: it doesn't special-case it the way
+// it does "ceph" (which must be plain http://).
+const s3CompatibleProvider tidbbrv1.S3StorageProviderType = "other"
+
+// brS3Provider tells BR what kind of S3 storage it writes to. As "aws", BR
+// looks up the bucket's region and refuses to run unless it matches the
+// configured one, which S3-compatible stores answer with their own names (Ceph
+// RGW and Linode say "default"). Any other endpoint is an S3-compatible store,
+// for which BR uses the endpoint and region as given.
+func brS3Provider(endpoint string) tidbbrv1.S3StorageProviderType {
+	if endpoint == "" {
+		return tidbbrv1.S3StorageProviderTypeAWS
+	}
+	u, err := url.Parse(endpoint)
+	if err == nil && (u.Hostname() == "amazonaws.com" || strings.HasSuffix(u.Hostname(), ".amazonaws.com")) {
+		return tidbbrv1.S3StorageProviderTypeAWS
+	}
+	return s3CompatibleProvider
+}
 
 // backupPrefix is the object-key prefix within the bucket, unique per backup so
 // backups sharing a bucket never collide.
@@ -89,7 +112,7 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 		brBackup.Spec.Mode = tidbbrv1.BackupModeSnapshot
 		brBackup.Spec.CleanPolicy = cleanPolicyFor(backup.Spec.DeletionPolicy)
 		brBackup.Spec.S3 = &tidbbrv1.S3StorageProvider{
-			Provider:   tidbbrv1.S3StorageProviderTypeAWS,
+			Provider:   brS3Provider(storage.Spec.S3.EndpointURL),
 			Region:     storage.Spec.S3.Region,
 			Bucket:     storage.Spec.S3.Bucket,
 			Endpoint:   storage.Spec.S3.EndpointURL,
@@ -220,7 +243,7 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 		brRestore.Spec.Type = tidbbrv1.BackupTypeFull
 		brRestore.Spec.Mode = tidbbrv1.RestoreModeSnapshot
 		brRestore.Spec.S3 = &tidbbrv1.S3StorageProvider{
-			Provider:   tidbbrv1.S3StorageProviderTypeAWS,
+			Provider:   brS3Provider(storage.Spec.S3.EndpointURL),
 			Region:     storage.Spec.S3.Region,
 			Bucket:     storage.Spec.S3.Bucket,
 			Endpoint:   storage.Spec.S3.EndpointURL,
