@@ -14,19 +14,32 @@ import (
 
 const pdDNSWaitContainer = "wait-for-dns"
 
-// pdDNSWaitScript waits until the pod's own peer DNS name resolves, for at most
-// three minutes. It asks DNS directly: /etc/hosts already has the pod's name.
-const pdDNSWaitScript = `for i in $(seq 180); do
-  nslookup "$(hostname).${PEER_DOMAIN}" >/dev/null 2>&1 && exit 0
-  sleep 1
+// pdDNSWaitScript waits until the pod's own peer DNS name resolves on 20
+// lookups in a row, for at most three minutes. It asks DNS directly:
+// /etc/hosts already has the pod's name.
+//
+// One successful lookup is not enough. Each CoreDNS replica caches a miss on
+// its own, and the misses before the name existed (this script's and peer
+// PDs') can still be cached on one replica after another one resolves it. Every
+// nslookup opens a new socket, so the lookups spread over the replicas, and a
+// replica still caching a miss resets the count.
+const pdDNSWaitScript = `ok=0
+for i in $(seq 720); do
+  if nslookup "$(hostname).${PEER_DOMAIN}" >/dev/null 2>&1; then
+    ok=$((ok+1))
+    [ "$ok" -ge 20 ] && exit 0
+  else
+    ok=0
+  fi
+  sleep 0.25
 done
-echo "DNS name $(hostname).${PEER_DOMAIN} still does not resolve; starting PD anyway"`
+echo "DNS name $(hostname).${PEER_DOMAIN} still does not resolve consistently; starting PD anyway"`
 
 // addPDDNSWait holds PD back until its peer DNS name resolves. PD's embedded
 // etcd looks up its own peer URL once at startup and exits when that fails.
 // While a new cluster comes up the names don't exist yet, CoreDNS caches the
-// miss (for 30s on most clusters), and PD crash-loops two or three times with
-// growing back-off before it starts.
+// miss (for 30s on most clusters, per replica), and PD crash-loops two or
+// three times with growing back-off before it starts.
 //
 // Only new PD groups get the init container, so upgrading the provider does
 // not roll the PD pods of existing clusters.
