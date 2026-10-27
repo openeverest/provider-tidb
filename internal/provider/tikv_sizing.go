@@ -33,26 +33,46 @@ var (
 	tikvMemorySizingThreshold = resource.MustParse("8Gi")
 )
 
-// tikvMemoryKeys are the TiKV settings the provider sizes. If the user's
-// config sets any of them, the provider sets none, so they stay consistent.
+// tikvMemoryKeys are the TiKV memory settings the provider sizes. If the
+// user's config sets any of them, the provider sets none, so they stay
+// consistent.
 var tikvMemoryKeys = [][]string{
 	{"storage", "block-cache", "capacity"},
 	{"rocksdb", "write-buffer-limit"},
 	{"memory-usage-limit"},
 }
 
+var (
+	tikvReserveSpaceKey = []string{"storage", "reserve-space"}
+	// tikvReserveSpaceThreshold is the volume size from which TiKV's default
+	// disk reserve is 5% of the disk anyway.
+	tikvReserveSpaceThreshold = resource.MustParse("100Gi")
+)
+
+// tikvReserveSpace replaces TiKV's default storage.reserve-space of 5 GiB on
+// small volumes. TiKV keeps max(5% of the disk, reserve-space) free and rejects
+// writes once less is available, so the default reserves half of a 10Gi volume.
+const tikvReserveSpace = "1GiB"
+
 // tikvConfig returns the TiKV config file for a group: the user's config,
-// plus memory settings that fit a small memory limit. TiKV sizes its caches
-// from the whole limit without leaving room for tikvRuntimeReserve, so on a
-// small limit it is OOM-killed under light load. The caches are sized from
-// what remains after the reserve instead, with TiKV's own ratios:
+// plus settings that fit a small memory limit or volume, for those the user
+// doesn't set.
+//
+// TiKV sizes its caches from the whole memory limit without leaving room for
+// tikvRuntimeReserve, so on a small limit it is OOM-killed under light load.
+// Below tikvMemorySizingThreshold the caches are sized from what remains after
+// the reserve instead, with TiKV's own ratios:
 //
 //   - storage.block-cache.capacity: 45% of the remainder
 //   - rocksdb.write-buffer-limit: 15% of the remainder, a cap on all memtables
 //   - memory-usage-limit: the reserve plus 75% of the remainder
-func tikvConfig(userConfig string, limits corev1.ResourceList) string {
-	limit, ok := limits[corev1.ResourceMemory]
-	if !ok || limit.Cmp(tikvMinMemory) < 0 || limit.Cmp(tikvMemorySizingThreshold) >= 0 {
+//
+// Below tikvReserveSpaceThreshold, storage.reserve-space is tikvReserveSpace.
+func tikvConfig(userConfig string, limits corev1.ResourceList, volume resource.Quantity) string {
+	limit, hasLimit := limits[corev1.ResourceMemory]
+	sizeMemory := hasLimit && limit.Cmp(tikvMinMemory) >= 0 && limit.Cmp(tikvMemorySizingThreshold) < 0
+	sizeDisk := !volume.IsZero() && volume.Cmp(tikvReserveSpaceThreshold) < 0
+	if !sizeMemory && !sizeDisk {
 		return userConfig
 	}
 
@@ -61,16 +81,21 @@ func tikvConfig(userConfig string, limits corev1.ResourceList) string {
 		// TiKV reports an invalid config itself; don't hide it behind ours.
 		return userConfig
 	}
-	for _, key := range tikvMemoryKeys {
-		if hasKey(cfg, key) {
-			return userConfig
-		}
+	changed := false
+	if sizeMemory && !hasAnyKey(cfg, tikvMemoryKeys) {
+		remainder := (limit.Value() - tikvRuntimeReserve.Value()) / mib
+		setKey(cfg, tikvMemoryKeys[0], fmt.Sprintf("%dMiB", remainder*45/100))
+		setKey(cfg, tikvMemoryKeys[1], fmt.Sprintf("%dMiB", remainder*15/100))
+		setKey(cfg, tikvMemoryKeys[2], fmt.Sprintf("%dMiB", tikvRuntimeReserve.Value()/mib+remainder*75/100))
+		changed = true
 	}
-
-	remainder := (limit.Value() - tikvRuntimeReserve.Value()) / mib
-	setKey(cfg, tikvMemoryKeys[0], fmt.Sprintf("%dMiB", remainder*45/100))
-	setKey(cfg, tikvMemoryKeys[1], fmt.Sprintf("%dMiB", remainder*15/100))
-	setKey(cfg, tikvMemoryKeys[2], fmt.Sprintf("%dMiB", tikvRuntimeReserve.Value()/mib+remainder*75/100))
+	if sizeDisk && !hasKey(cfg, tikvReserveSpaceKey) {
+		setKey(cfg, tikvReserveSpaceKey, tikvReserveSpace)
+		changed = true
+	}
+	if !changed {
+		return userConfig
+	}
 
 	var buf bytes.Buffer
 	enc := toml.NewEncoder(&buf)
@@ -79,6 +104,15 @@ func tikvConfig(userConfig string, limits corev1.ResourceList) string {
 		return userConfig
 	}
 	return buf.String()
+}
+
+func hasAnyKey(cfg map[string]any, keys [][]string) bool {
+	for _, key := range keys {
+		if hasKey(cfg, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasKey(cfg map[string]any, key []string) bool {

@@ -14,6 +14,9 @@ import (
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
+// largeVolume leaves TiKV's disk reserve alone.
+var largeVolume = resource.MustParse("100Gi")
+
 func memoryLimit(q string) corev1.ResourceList {
 	return corev1.ResourceList{corev1.ResourceMemory: resource.MustParse(q)}
 }
@@ -42,7 +45,7 @@ func TestTiKVConfigSizesSmallLimits(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.limit, func(t *testing.T) {
 			var got tikvMemorySettings
-			if _, err := toml.Decode(tikvConfig("", memoryLimit(tt.limit)), &got); err != nil {
+			if _, err := toml.Decode(tikvConfig("", memoryLimit(tt.limit), largeVolume), &got); err != nil {
 				t.Fatal(err)
 			}
 			if got.Storage.BlockCache.Capacity != tt.blockCache || got.RocksDB.WriteBufferLimit != tt.buffers ||
@@ -68,7 +71,7 @@ func TestTiKVConfigKeepsTheUsersConfig(t *testing.T) {
 			} `toml:"block-cache"`
 		} `toml:"storage"`
 	}
-	if _, err := toml.Decode(tikvConfig(user, memoryLimit("4Gi")), &got); err != nil {
+	if _, err := toml.Decode(tikvConfig(user, memoryLimit("4Gi"), largeVolume), &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Raftstore.ApplyPoolSize != 2 || got.Storage.ReserveSpace != "1GiB" {
@@ -99,8 +102,43 @@ func TestTiKVConfigLeavesTiKVDefaults(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tikvConfig(tt.config, tt.limits); got != tt.config {
+			if got := tikvConfig(tt.config, tt.limits, largeVolume); got != tt.config {
 				t.Errorf("tikvConfig = %q, want the user's config unchanged %q", got, tt.config)
+			}
+		})
+	}
+}
+
+func TestTiKVConfigReservesLessSpaceOnSmallVolumes(t *testing.T) {
+	reserveSpace := func(config string) string {
+		var got struct {
+			Storage struct {
+				ReserveSpace string `toml:"reserve-space"`
+			} `toml:"storage"`
+		}
+		if _, err := toml.Decode(config, &got); err != nil {
+			t.Fatal(err)
+		}
+		return got.Storage.ReserveSpace
+	}
+	if got := reserveSpace(tikvConfig("", nil, resource.MustParse("10Gi"))); got != "1GiB" {
+		t.Errorf("reserve-space on a 10Gi volume = %q, want 1GiB", got)
+	}
+	both := tikvConfig("", memoryLimit("4Gi"), resource.MustParse("20Gi"))
+	var got tikvMemorySettings
+	if _, err := toml.Decode(both, &got); err != nil {
+		t.Fatal(err)
+	}
+	if reserveSpace(both) != "1GiB" || got.Storage.BlockCache.Capacity != "921MiB" {
+		t.Errorf("small memory and volume: config = %q, want both sized", both)
+	}
+	for _, tt := range []struct{ name, config, volume string }{
+		{name: "large volume", volume: "100Gi"},
+		{name: "user sets reserve-space", volume: "10Gi", config: "[storage]\nreserve-space = \"2GiB\"\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tikvConfig(tt.config, nil, resource.MustParse(tt.volume)); got != tt.config {
+				t.Errorf("tikvConfig = %q, want %q", got, tt.config)
 			}
 		})
 	}

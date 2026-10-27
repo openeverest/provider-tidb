@@ -436,7 +436,7 @@ func buildTiKVGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, imag
 	if comp.Resources != nil {
 		limits = comp.Resources.Limits
 	}
-	if cfg := tikvConfig(componentConfig(c, comp), limits); cfg != "" {
+	if cfg := tikvConfig(componentConfig(c, comp), limits, tmpl.Volumes[0].Storage); cfg != "" {
 		tmpl.Config = tidbcorev1.ConfigFile(cfg)
 	}
 	return &tidbcorev1.TiKVGroup{

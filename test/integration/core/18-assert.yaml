@@ -22,7 +22,8 @@ spec:
         cpu: "1"
         memory: 4Gi
       # Below 8Gi the provider sizes TiKV's memory after the ~2Gi TiKV keeps
-      # for its own runtime.
+      # for its own runtime, and below 100Gi of disk it reserves 1GiB instead
+      # of TiKV's 5GiB.
       config: |
         memory-usage-limit = "3584MiB"
 
@@ -30,6 +31,7 @@ spec:
         write-buffer-limit = "307MiB"
 
         [storage]
+        reserve-space = "1GiB"
         [storage.block-cache]
         capacity = "921MiB"
 ---
