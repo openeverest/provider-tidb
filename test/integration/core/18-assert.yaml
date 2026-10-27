@@ -20,7 +20,18 @@ spec:
     spec:
       resources:
         cpu: "1"
-        memory: 2Gi
+        memory: 4Gi
+      # Below 8Gi the provider sizes TiKV's memory after the ~2Gi TiKV keeps
+      # for its own runtime.
+      config: |
+        memory-usage-limit = "3584MiB"
+
+        [rocksdb]
+        write-buffer-limit = "307MiB"
+
+        [storage]
+        [storage.block-cache]
+        capacity = "921MiB"
 ---
 apiVersion: core.pingcap.com/v1alpha1
 kind: TiDBGroup
