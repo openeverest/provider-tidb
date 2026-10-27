@@ -98,6 +98,21 @@ spec:
         - action: keep
           sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
           regex: tiflash
+    - port: api
+      path: /api/metrics
+      interval: 30s
+      scheme: https
+      tlsConfig:
+        ca:
+          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
+        cert:
+          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
+        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
+        serverName: test-instance-tiproxy
+      relabelings:
+        - action: keep
+          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
+          regex: tiproxy
 ---
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
@@ -195,3 +210,18 @@ spec:
         - action: keep
           sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
           regex: tiflash
+    - port: api
+      path: /api/metrics
+      interval: 1m
+      scheme: https
+      tlsConfig:
+        ca:
+          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
+        cert:
+          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
+        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
+        serverName: test-instance-tiproxy
+      relabelConfigs:
+        - action: keep
+          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
+          regex: tiproxy
