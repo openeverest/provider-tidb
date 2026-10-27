@@ -143,11 +143,11 @@ func ensureTLSSecrets(c *controller.Context, owner *tidbcorev1.Cluster) error {
 		return err
 	}
 	for _, leaf := range leaves {
-		found, err := c.Exists(&corev1.Secret{}, leaf.secretName)
+		existing, err := currentSecret(c, owner.UID, leaf.secretName)
 		if err != nil {
-			return fmt.Errorf("get TLS secret %q: %w", leaf.secretName, err)
+			return err
 		}
-		if found {
+		if existing != nil {
 			continue
 		}
 		certPEM, keyPEM, err := ca.issue(leaf)
@@ -171,25 +171,24 @@ func ensureTLSSecrets(c *controller.Context, owner *tidbcorev1.Cluster) error {
 // verify the certificates the pods already use.
 func ensureCA(c *controller.Context, owner *tidbcorev1.Cluster, leaves []leafCert) (*certAuthority, error) {
 	name := tlsCASecretName(c.Name())
-	secret := &corev1.Secret{}
-	err := c.Get(secret, name)
-	if err == nil {
+	secret, err := currentSecret(c, owner.UID, name)
+	if err != nil {
+		return nil, err
+	}
+	if secret != nil {
 		ca, err := parseCertAuthority(secret.Data[tlsKeyCA], secret.Data[tlsKeyCAKey])
 		if err != nil {
 			return nil, fmt.Errorf("read the CA from secret %q: %w", name, err)
 		}
 		return ca, nil
 	}
-	if !apierrors.IsNotFound(err) {
-		return nil, fmt.Errorf("get CA secret %q: %w", name, err)
-	}
 
 	for _, leaf := range leaves {
-		found, err := c.Exists(&corev1.Secret{}, leaf.secretName)
+		existing, err := currentSecret(c, owner.UID, leaf.secretName)
 		if err != nil {
-			return nil, fmt.Errorf("get TLS secret %q: %w", leaf.secretName, err)
+			return nil, err
 		}
-		if found {
+		if existing != nil {
 			return nil, fmt.Errorf("CA secret %q is missing but certificate secret %q exists; restore the CA secret "+
 				"or delete the certificate secrets to issue new ones", name, leaf.secretName)
 		}
