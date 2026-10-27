@@ -21,8 +21,9 @@ var (
 	// tikvRuntimeReserve is memory TiKV holds but does not budget for. At
 	// startup it resolves a backtrace ahead of time for its panic hook, which
 	// decompresses and caches the binary's debug info (about 1.8 GiB in the
-	// official images) for the life of the process.
-	tikvRuntimeReserve = resource.MustParse("2Gi")
+	// official images) for the life of the process. A TiKV with empty caches
+	// uses about 2.3 GiB.
+	tikvRuntimeReserve = resource.MustParse("2560Mi")
 	// tikvMinMemory is the smallest TiKV memory limit accepted for new and
 	// changed Instances: below it TiKV is OOM-killed under light load.
 	tikvMinMemory = resource.MustParse("4Gi")

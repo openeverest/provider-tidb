@@ -540,14 +540,14 @@ or `v1.3.2` via `spec.components.tiproxy.version`); the user selects one via `In
 ### TiKV memory and disk
 
 TiKV needs a memory limit of at least **4Gi**; the provider rejects a smaller one on a new Instance
-or when the limit changes. About 2 GiB of it is TiKV's own runtime: at startup TiKV caches its
+or when the limit changes. About 2.5 GiB of it is TiKV's own runtime: at startup TiKV caches its
 binary's debug info so it can print a stack trace if it panics, and keeps it for the life of the
 process. TiKV doesn't count that when it sizes its caches from the limit (block cache 45%,
 `memory-usage-limit` 75%), so with a small limit it is OOM-killed under light load.
 
-For a limit below 8Gi the provider therefore sizes TiKV's memory from what remains after 2 GiB,
+For a limit below 8Gi the provider therefore sizes TiKV's memory from what remains after 2.5 GiB,
 with TiKV's own ratios: `storage.block-cache.capacity` 45%, `rocksdb.write-buffer-limit` (all
-memtables) 15%, and `memory-usage-limit` 2 GiB plus 75%. From 8Gi up TiKV's defaults leave enough
+memtables) 15%, and `memory-usage-limit` 2.5 GiB plus 75%. From 8Gi up TiKV's defaults leave enough
 room and are used as they are. To size TiKV yourself, set any of these three keys in
 `spec.components.tikv.parameters.config`; the provider then sets none of them.
 

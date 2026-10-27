@@ -38,9 +38,9 @@ func TestTiKVConfigSizesSmallLimits(t *testing.T) {
 		limit                      string
 		blockCache, buffers, usage string
 	}{
-		// 2 GiB is left after the runtime reserve.
-		{limit: "4Gi", blockCache: "921MiB", buffers: "307MiB", usage: "3584MiB"},
-		{limit: "6Gi", blockCache: "1843MiB", buffers: "614MiB", usage: "5120MiB"},
+		// 1.5 GiB is left after the runtime reserve.
+		{limit: "4Gi", blockCache: "691MiB", buffers: "230MiB", usage: "3712MiB"},
+		{limit: "6Gi", blockCache: "1612MiB", buffers: "537MiB", usage: "5248MiB"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.limit, func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestTiKVConfigKeepsTheUsersConfig(t *testing.T) {
 	if got.Raftstore.ApplyPoolSize != 2 || got.Storage.ReserveSpace != "1GiB" {
 		t.Errorf("the user's settings were lost: %+v", got)
 	}
-	if got.Storage.BlockCache.Capacity != "921MiB" || got.MemoryUsageLimit != "3584MiB" {
+	if got.Storage.BlockCache.Capacity != "691MiB" || got.MemoryUsageLimit != "3712MiB" {
 		t.Errorf("memory settings missing next to the user's config: %+v", got)
 	}
 }
@@ -129,7 +129,7 @@ func TestTiKVConfigReservesLessSpaceOnSmallVolumes(t *testing.T) {
 	if _, err := toml.Decode(both, &got); err != nil {
 		t.Fatal(err)
 	}
-	if reserveSpace(both) != "1GiB" || got.Storage.BlockCache.Capacity != "921MiB" {
+	if reserveSpace(both) != "1GiB" || got.Storage.BlockCache.Capacity != "691MiB" {
 		t.Errorf("small memory and volume: config = %q, want both sized", both)
 	}
 	for _, tt := range []struct{ name, config, volume string }{
