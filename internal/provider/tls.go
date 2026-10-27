@@ -73,6 +73,16 @@ func mysqlServerTLSSecretName(instance string) string {
 	return instance + "-tidb-server-secret"
 }
 
+// TiProxy's MySQL server certificate, and the client certificate (with the CA
+// that verifies TiDB) it presents to TiDB's MySQL port.
+func tiproxyServerTLSSecretName(instance string) string {
+	return instance + "-tiproxy-server-secret"
+}
+
+func tiproxyBackendTLSSecretName(instance string) string {
+	return instance + "-tiproxy-tidb-secret"
+}
+
 // leafCert describes one certificate the provider issues into a Secret.
 type leafCert struct {
 	secretName string
@@ -81,11 +91,16 @@ type leafCert struct {
 	usages     []x509.ExtKeyUsage
 }
 
-// tlsLeaves lists the certificates the Instance's TLS settings need.
-func tlsLeaves(instance, namespace string, settings cluster.TLS) []leafCert {
+// tlsLeaves lists the certificates the Instance's TLS settings need. TiProxy's
+// are only issued while it is enabled.
+func tlsLeaves(instance, namespace string, settings cluster.TLS, tiproxy bool) []leafCert {
 	var leaves []leafCert
 	if settings.Cluster {
-		for _, component := range []string{common.ComponentPD, common.ComponentTiKV, common.ComponentTiDB, common.ComponentTiFlash} {
+		components := []string{common.ComponentPD, common.ComponentTiKV, common.ComponentTiDB, common.ComponentTiFlash}
+		if tiproxy {
+			components = append(components, common.ComponentTiProxy)
+		}
+		for _, component := range components {
 			svc := instance + "-" + component
 			leaves = append(leaves, leafCert{
 				secretName: clusterTLSSecretName(instance, component),
@@ -108,6 +123,21 @@ func tlsLeaves(instance, namespace string, settings cluster.TLS) []leafCert {
 			dnsNames:   append(serviceDNSNames(svc, namespace), peerDNSNames(svc+"-peer", namespace)...),
 			usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		})
+		if tiproxy {
+			proxy := instance + "-" + common.ComponentTiProxy
+			leaves = append(leaves,
+				leafCert{
+					secretName: tiproxyServerTLSSecretName(instance),
+					commonName: proxy,
+					dnsNames:   append(serviceDNSNames(proxy, namespace), peerDNSNames(proxy+"-peer", namespace)...),
+					usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+				},
+				leafCert{
+					secretName: tiproxyBackendTLSSecretName(instance),
+					commonName: proxy,
+					usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+				})
+		}
 	}
 	return leaves
 }
@@ -125,12 +155,17 @@ func peerDNSNames(svc, namespace string) []string {
 	return names
 }
 
-// ensureTLSSecrets creates the CA and every certificate the TLS settings need,
-// owned by the Cluster so they outlive the pods during the operator's ordered
-// teardown. Existing Secrets are never replaced: certificates are issued once.
+// ensureTLSSecrets creates the CA and every certificate the TLS settings and
+// TiProxy's session migration need, owned by the Cluster so they outlive the
+// pods during the operator's ordered teardown. Existing Secrets are never
+// replaced: certificates are issued once.
 func ensureTLSSecrets(c *controller.Context, owner *tidbcorev1.Cluster) error {
 	settings := tlsSettings(c)
-	leaves := tlsLeaves(c.Name(), c.Namespace(), settings)
+	_, tiproxy := enabledTiProxy(c.Instance().Spec.Components)
+	leaves := tlsLeaves(c.Name(), c.Namespace(), settings, tiproxy)
+	if usesSessionTokenSigning(c, owner) {
+		leaves = append(leaves, sessionTokenSigningLeaf(c.Name()))
+	}
 	if len(leaves) == 0 {
 		return nil
 	}

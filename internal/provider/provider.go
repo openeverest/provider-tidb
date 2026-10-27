@@ -63,11 +63,13 @@ func New() *Provider {
 				controller.WatchExternal(&tidbcorev1.TiKVGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
 				controller.WatchExternal(&tidbcorev1.TiDBGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
 				controller.WatchExternal(&tidbcorev1.TiFlashGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
+				controller.WatchExternal(&tidbcorev1.TiProxyGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),
 				// Instances are owned by their group, not the Instance, so map them back by cluster label.
 				controller.WatchExternal(&tidbcorev1.PD{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				controller.WatchExternal(&tidbcorev1.TiKV{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				controller.WatchExternal(&tidbcorev1.TiDB{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				controller.WatchExternal(&tidbcorev1.TiFlash{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
+				controller.WatchExternal(&tidbcorev1.TiProxy{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				// Re-reconcile an Instance when its seeding Restore (.spec.dataSource) changes.
 				controller.WatchExternal(&backupv1alpha1.Restore{}, handler.EnqueueRequestsFromMapFunc(instanceForRestore)),
 			},

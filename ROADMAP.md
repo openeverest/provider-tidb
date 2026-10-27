@@ -37,7 +37,7 @@ source of truth for scope; update it as milestones land.
 | component `tidb` | `TiDBGroup` (stateless, no volume) |
 | component `tiflash` *(optional)* | `TiFlashGroup` (+ `data` volume) |
 | component `ticdc` *(later)* | `TiCDCGroup` |
-| component `tiproxy` *(later)* | `TiProxyGroup` (own version line) |
+| component `tiproxy` *(optional)* | `TiProxyGroup` (stateless, own version line) |
 | `component.replicas` | `*Group.spec.replicas` |
 | `component.resources` (cpu/mem) | `template.spec.resources` (v2 sets requests==limits) |
 | `component.storage` (size/class) | `template.spec.volumes[]` (`data` mount) |
@@ -136,7 +136,10 @@ Ordered by value/effort; each phase is independently shippable.
 ### Phase 3 — HTAP & connectivity components
 - **TiFlash** component (`TiFlashGroup`) — columnar/HTAP, optional in the topology (done: enabled
   while it has a replica count other than `0`).
-- **TiProxy** component (`TiProxyGroup`) — connection proxy / session migration (own version line).
+- **TiProxy** component (`TiProxyGroup`) — connection proxy / session migration (own version line)
+  (done: enabled while it has a replica count other than `0`; the connection details then point at
+  TiProxy, TiDB signs session tokens with a provider-issued certificate under the operator's
+  `SessionTokenSigning` feature gate, and TLS and monitoring cover it).
 - **TiCDC** component (`TiCDCGroup`) — change-data-capture.
 - **External access:** map `component.service` → v2 `server`/expose for LoadBalancer/NodePort.
 

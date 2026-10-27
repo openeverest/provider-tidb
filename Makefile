@@ -196,7 +196,7 @@ install-crds: yq ## Install OpenEverest CRDs (and your operator's CRDs) into the
 	kubectl apply -f https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_BRANCH)/config/crd/bases/backup.openeverest.io_backups.yaml
 	kubectl apply -f https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_BRANCH)/config/crd/bases/backup.openeverest.io_restores.yaml
 	kubectl apply -f https://raw.githubusercontent.com/openeverest/openeverest/$(OPENEVEREST_BRANCH)/config/crd/bases/backup.openeverest.io_backupstorages.yaml
-	# TiDB Operator v2 CRDs used by this provider (Cluster + PD/TiKV/TiDB/TiFlash groups and instances).
+	# TiDB Operator v2 CRDs used by this provider (Cluster + PD/TiKV/TiDB/TiFlash/TiProxy groups and instances).
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_clusters.yaml
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_pdgroups.yaml
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_pds.yaml
@@ -206,6 +206,8 @@ install-crds: yq ## Install OpenEverest CRDs (and your operator's CRDs) into the
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_tidbs.yaml
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_tiflashgroups.yaml
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_tiflashes.yaml
+	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_tiproxygroups.yaml
+	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/core.pingcap.com_tiproxies.yaml
 	# TiDB Operator BR CRDs used by the backup provider.
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/br.pingcap.com_backups.yaml
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/br.pingcap.com_restores.yaml

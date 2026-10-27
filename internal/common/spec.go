@@ -15,6 +15,8 @@ const (
 	ComponentTiDB = "tidb"
 	// ComponentTiFlash is optional: present with a non-zero replica count means enabled.
 	ComponentTiFlash = "tiflash"
+	// ComponentTiProxy is optional like TiFlash. It has its own version line.
+	ComponentTiProxy = "tiproxy"
 
 	// TopologyCluster is the standard distributed TiDB topology.
 	TopologyCluster = "cluster"

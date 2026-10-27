@@ -29,8 +29,10 @@ package provider
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=tidbgroups/status,verbs=get
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=tiflashgroups,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=tiflashgroups/status,verbs=get
+// +kubebuilder:rbac:groups=core.pingcap.com,resources=tiproxygroups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core.pingcap.com,resources=tiproxygroups/status,verbs=get
 // Per-instance CRs the operator creates; their conditions explain unhealthy pods.
-// +kubebuilder:rbac:groups=core.pingcap.com,resources=pds;tikvs;tidbs;tiflashes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core.pingcap.com,resources=pds;tikvs;tidbs;tiflashes;tiproxies,verbs=get;list;watch
 
 // Backup: OpenEverest backup resources the runtime reconciles.
 // +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupclasses,verbs=get;list;watch
