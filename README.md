@@ -125,6 +125,22 @@ See [ROADMAP.md](ROADMAP.md) for the planned work.
 > PD also refuses to remove a store if fewer stores than its `max-replicas` (3 by default) would be
 > left, so a cluster with fewer TiKV nodes than that can't turn TiFlash off.
 > The Instance reports `Updating` with `tiflash (removing)` until the nodes are gone.
+>
+> Once a table has TiFlash replicas, the optimizer may read it from TiFlash in *any* session,
+> including parts of OLTP transactions. If TiFlash is busy with analytical queries, those
+> transactions slow down. Pin OLTP connections to the row store with
+> `SET SESSION tidb_isolation_read_engines = 'tikv,tidb'` (or the equivalent connection parameter)
+> and let analytical sessions use `'tiflash,tidb'`. To make TiKV the default for every session
+> instead, set it in the TiDB `config` (TiDB pods restart one at a time to apply it); sessions can
+> still opt in to TiFlash with `SET SESSION tidb_isolation_read_engines = 'tiflash,tidb'`:
+>
+> ```toml
+> [isolation-read]
+> engines = ["tikv", "tidb"]
+> ```
+>
+> TiFlash runs analytical joins and aggregations in memory: give it at least 32Gi, which is what
+> the `tidb-analytics` preset uses.
 
 > [!NOTE]
 > TiDB Operator v2 has no controller for `BackupSchedule`, so the provider runs
