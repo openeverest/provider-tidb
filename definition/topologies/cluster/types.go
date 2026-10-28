@@ -19,9 +19,10 @@ type ClusterTopologyParameters struct {
 // cert-manager instead.
 type TLS struct {
 	// Cluster encrypts and mutually authenticates the traffic between PD, TiKV,
-	// TiDB and TiFlash.
+	// TiDB, TiFlash and TiProxy.
 	Cluster bool `json:"cluster,omitempty"`
-	// Client lets MySQL clients connect to TiDB over TLS.
+	// Client lets MySQL clients connect to TiDB and TiProxy over TLS; TiProxy
+	// then reaches TiDB over TLS too.
 	Client bool `json:"client,omitempty"`
 	// CertManager issues the certificates with cert-manager. Chosen when the
 	// Instance is created, like the settings above.
@@ -56,7 +57,8 @@ type Monitoring struct {
 	VictoriaMetrics *VictoriaMetrics `json:"victoriaMetrics,omitempty"`
 }
 
-// Prometheus configures the PodMonitor that scrapes PD, TiKV, TiDB and TiFlash.
+// Prometheus configures the PodMonitor that scrapes PD, TiKV, TiDB, TiFlash and
+// TiProxy.
 type Prometheus struct {
 	// Enabled creates the PodMonitor; disabling it removes the PodMonitor.
 	Enabled bool `json:"enabled,omitempty"`
@@ -68,8 +70,8 @@ type Prometheus struct {
 	PodMonitorLabels map[string]string `json:"podMonitorLabels,omitempty"`
 }
 
-// VictoriaMetrics configures the VMPodScrape that scrapes PD, TiKV, TiDB and
-// TiFlash.
+// VictoriaMetrics configures the VMPodScrape that scrapes PD, TiKV, TiDB,
+// TiFlash and TiProxy.
 type VictoriaMetrics struct {
 	// Enabled creates the VMPodScrape; disabling it removes the VMPodScrape.
 	Enabled bool `json:"enabled,omitempty"`
