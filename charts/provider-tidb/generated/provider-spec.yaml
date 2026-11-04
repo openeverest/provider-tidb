@@ -79,6 +79,23 @@ spec:
           type: object
       type: tiproxy
   defaultVersion: 8.5.2
+  monitoring:
+    componentTypes:
+      pd:
+        kind: tidb.pd
+        metrics: Native
+      tidb:
+        kind: tidb
+        metrics: Native
+      tiflash:
+        kind: tidb.tiflash
+        metrics: Native
+      tikv:
+        kind: tikv
+        metrics: Native
+      tiproxy:
+        kind: tidb.tiproxy
+        metrics: Native
   release:
     version: 0.1.1
   topologies:
@@ -138,31 +155,6 @@ spec:
       parametersSchema:
         openAPIV3Schema:
           properties:
-            monitoring:
-              properties:
-                prometheus:
-                  properties:
-                    enabled:
-                      type: boolean
-                    interval:
-                      type: string
-                    podMonitorLabels:
-                      additionalProperties:
-                        type: string
-                      type: object
-                  type: object
-                victoriaMetrics:
-                  properties:
-                    enabled:
-                      type: boolean
-                    interval:
-                      type: string
-                    podScrapeLabels:
-                      additionalProperties:
-                        type: string
-                      type: object
-                  type: object
-              type: object
             tls:
               properties:
                 certManager:
@@ -257,25 +249,6 @@ spec:
                 required: true
           description: Select the TiDB version for this cluster.
           label: Database Version
-        monitoring:
-          components:
-            prometheus:
-              fieldParams:
-                helperText: Creates a PodMonitor that scrapes PD, TiKV, TiDB, TiFlash and TiProxy. Requires the Prometheus Operator.
-                label: Prometheus
-              path: spec.topology.parameters.monitoring.prometheus.enabled
-              uiType: toggle
-            victoriaMetrics:
-              fieldParams:
-                helperText: Creates a VMPodScrape that scrapes PD, TiKV, TiDB, TiFlash and TiProxy. Requires the VictoriaMetrics Operator.
-                label: VictoriaMetrics
-              path: spec.topology.parameters.monitoring.victoriaMetrics.enabled
-              uiType: toggle
-          componentsOrder:
-            - prometheus
-            - victoriaMetrics
-          description: Collect TiDB metrics with Prometheus or VictoriaMetrics.
-          label: Monitoring
         pd:
           components:
             pdGroup:
@@ -665,7 +638,6 @@ spec:
         - tiproxy
         - pd
         - security
-        - monitoring
         - advanced
   versions:
     - components:
