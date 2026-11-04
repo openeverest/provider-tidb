@@ -1,0 +1,41 @@
+# Source Instance with point-in-time recovery on s3-store. Both kinds of TLS
+# are on, as the UI creates new Instances, so the log backup jobs talk to PD
+# over mTLS.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  providerRef:
+    name: tidb
+  version: "8.5.2"
+  topology:
+    type: cluster
+    parameters:
+      tls:
+        cluster: true
+        client: true
+  components:
+    pd:
+      type: pd
+      replicas: 1
+      storage:
+        size: 10Gi
+      parameters:
+        config: |
+          [replication]
+          max-replicas = 1
+    tikv:
+      type: tikv
+      replicas: 1
+      storage:
+        size: 20Gi
+    tidb:
+      type: tidb
+      replicas: 1
+  backup:
+    enabled: true
+    classRef: {name: br}
+    storages:
+      - storageRef: {name: s3-store}
+        pitr: {enabled: true}

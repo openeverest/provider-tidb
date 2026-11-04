@@ -1,0 +1,25 @@
+# MySQL client for the clone, with the credentials the provider published in clone-conn.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: clone-shell
+  labels:
+    app.kubernetes.io/name: sql-client
+spec:
+  containers:
+    - name: mysql
+      image: mysql:8.4
+      command: ["sleep", "infinity"]
+      env:
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef: {name: clone-conn, key: host}
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef: {name: clone-conn, key: port}
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef: {name: clone-conn, key: username}
+        - name: MYSQL_PWD
+          valueFrom:
+            secretKeyRef: {name: clone-conn, key: password}

@@ -149,3 +149,13 @@ jobs:
       suite: e2e
       deploy_target: deploy-provider-e2e
     secrets: inherit
+
+  test-integration-pitr:
+    name: Integration / pitr
+    needs: [lint, build, verify]
+    uses: ./.github/workflows/integration-test.yaml
+    with:
+      make_target: test-integration-pitr
+      suite: pitr
+      deploy_target: deploy-provider-e2e
+    secrets: inherit

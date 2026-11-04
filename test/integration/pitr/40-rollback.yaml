@@ -1,0 +1,15 @@
+# Rolling the Instance that writes the stream back in place: BR needs an empty
+# cluster without a log backup, so the provider refuses it.
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: rollback
+spec:
+  instanceRef:
+    name: test-instance
+  dataSource:
+    type: PointInTime
+    pointInTime:
+      source:
+        storageRef: {name: s3-store}
+      recoveryTarget: latest

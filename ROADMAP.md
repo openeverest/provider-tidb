@@ -131,7 +131,9 @@ Ordered by value/effort; each phase is independently shippable.
   - `BackupSchedule` (cron) — v2 ships the CRD without a controller, so the provider runs the
     schedules itself and creates a `Backup` per slot (with count/time retention).
 - **PITR:** `backupMode: log` + `restoreMode: pitr`; report restorable-time window via
-  `InstanceBackupStatusReporter`.
+  `InstanceBackupStatusReporter` (done: one log backup per Instance while a storage enables PITR;
+  points restore into a new Instance, since BR needs an empty cluster. Next: truncate the log
+  alongside full-backup retention).
 
 ### Phase 3 — HTAP & connectivity components
 - **TiFlash** component (`TiFlashGroup`) — columnar/HTAP, optional in the topology (done: enabled

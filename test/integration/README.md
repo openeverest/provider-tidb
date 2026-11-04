@@ -23,6 +23,7 @@ test/
       00-assert.yaml           # Step files, prefixed by execution order
       ...
     e2e/                       # Real TiDB Operator provisioning actual pods
+    pitr/                      # Real TiDB Operator: log backup, restorable window, clone from a point
 ```
 
 Each suite is a directory containing one `chainsaw-test.yaml` plus the

@@ -1,0 +1,11 @@
+# Deleting the source stopped its log backup and tore its cluster down.
+apiVersion: br.pingcap.com/v1alpha1
+kind: Backup
+metadata:
+  name: test-instance-pitr
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    pingcap.com/cluster: test-instance

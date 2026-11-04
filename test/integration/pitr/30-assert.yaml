@@ -1,0 +1,15 @@
+# The window opens at the full backup and runs to the log backup's checkpoint
+# (the previous script already saw the checkpoint pass the point).
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+status:
+  backup:
+    storages:
+      - name: s3-store
+        pitr:
+          state: Available
+          reason: WindowAvailable
+          (earliestRestorableTime != null): true
+          (latestRestorableTime != null): true

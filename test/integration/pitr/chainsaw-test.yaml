@@ -1,0 +1,183 @@
+---
+# Point-in-time recovery against the real TiDB Operator: a continuous log
+# backup on the source Instance, the restorable window it reports, and a new
+# Instance seeded from a point of it. Requires the provider deployed WITH the
+# bundled operator and its CRDs (see the deploy-provider-e2e Make target).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: pitr
+spec:
+  description: |
+    Enable point-in-time recovery on an Instance and check the log backup runs,
+    take a full backup and check the restorable window, then seed a new
+    Instance from a point between two writes and check it has the first only.
+
+  # Image pulls, bootstrap, and TiKV flushing the log (every few minutes) take minutes.
+  timeouts:
+    assert: 10m
+    error: 5m
+    delete: 5m
+    cleanup: 5m
+
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get instances.core.openeverest.io -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get backups.backup.openeverest.io,restores.backup.openeverest.io,backups.br.pingcap.com,restores.br.pingcap.com,jobs -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get pods,pvc,events -o wide
+    - script:
+        content: |
+          for p in $(kubectl -n $NAMESPACE get pods -l app.kubernetes.io/component=backup-manager -o name 2>/dev/null) \
+                   $(kubectl -n $NAMESPACE get pods -o name | grep -E 'backup-|restore-|stop-|clean-'); do
+            echo "===== $p"; kubectl -n $NAMESPACE logs $p --all-containers --tail=100 || true
+          done
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/name=provider-tidb
+        tail: 100
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/component=tidb-operator
+        tail: 100
+
+  steps:
+    - name: operator-and-provider-deployed
+      try:
+        - assert:
+            file: ../e2e/00-assert.yaml
+
+    - name: s3
+      try:
+        - apply:
+            file: ../e2e/70-s3.yaml
+        - assert:
+            file: ../e2e/70-assert.yaml
+        - apply:
+            file: ../e2e/71-bucket.yaml
+        - assert:
+            file: ../e2e/71-assert.yaml
+        - apply:
+            file: ../e2e/72-backup-storage.yaml
+
+    - name: log-backup-runs
+      try:
+        - apply:
+            file: 10-source.yaml
+        - assert:
+            file: ../e2e/20-assert.yaml
+        - assert:
+            file: ../core/11-assert.yaml
+        - assert:
+            file: 10-assert.yaml
+
+    - name: full-backup-opens-the-window
+      try:
+        - apply:
+            file: ../e2e/50-sql-shell.yaml
+        - assert:
+            file: ../e2e/50-assert.yaml
+        - script:
+            content: |
+              set -e
+              sql() { echo "$1" | kubectl -n $NAMESPACE exec -i sql-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s'; }
+              sql "CREATE DATABASE pitr; CREATE TABLE pitr.rows (id INT PRIMARY KEY, v VARCHAR(64));"
+              sql "INSERT INTO pitr.rows WITH RECURSIVE s(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM s WHERE n < 100) SELECT n, MD5(n) FROM s;"
+        - apply:
+            file: 20-backup.yaml
+        - assert:
+            file: 20-assert.yaml
+
+    - name: write-around-a-point
+      try:
+        # Row 101 is written before the point, row 102 after; the point is kept
+        # in a ConfigMap for the clone step.
+        - script:
+            content: |
+              set -e
+              sql() { echo "$1" | kubectl -n $NAMESPACE exec -i sql-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s'; }
+              sql "INSERT INTO pitr.rows VALUES (101, 'before the point');"
+              sleep 5
+              point=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              sleep 5
+              sql "INSERT INTO pitr.rows VALUES (102, 'after the point');"
+              kubectl -n $NAMESPACE create configmap pitr-point --from-literal=date="$point"
+              echo "point: $point"
+        # The window reaches past the point once TiKV flushed the log beyond it.
+        - script:
+            timeout: 10m
+            content: |
+              set -e
+              point=$(kubectl -n $NAMESPACE get configmap pitr-point -o jsonpath='{.data.date}')
+              while true; do
+                latest=$(kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance \
+                  -o jsonpath='{.status.backup.storages[?(@.name=="s3-store")].pitr.latestRestorableTime}')
+                echo "latest restorable time: ${latest:-none}, point: $point"
+                # Both are RFC 3339 in UTC, so they compare as strings.
+                [ -n "$latest" ] && expr "$latest" \> "$point" >/dev/null && exit 0
+                sleep 15
+              done
+        - assert:
+            file: 30-assert.yaml
+
+    - name: in-place-rollback-is-refused
+      try:
+        - apply:
+            file: 40-rollback.yaml
+        - assert:
+            file: 40-assert.yaml
+
+    - name: clone-from-the-point
+      try:
+        - script:
+            content: |
+              set -e
+              point=$(kubectl -n $NAMESPACE get configmap pitr-point -o jsonpath='{.data.date}')
+              sed "s/POINT/$point/" 50-clone.yaml | kubectl -n $NAMESPACE apply -f -
+        - assert:
+            file: 50-assert.yaml
+        - apply:
+            file: 51-clone-shell.yaml
+        - assert:
+            file: 51-assert.yaml
+        # The clone has every row written before the point and none after it.
+        - script:
+            content: |
+              set -e
+              sql() { echo "$1" | kubectl -n $NAMESPACE exec -i clone-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s'; }
+              rows=$(sql "SELECT COUNT(*), MAX(id) FROM pitr.rows;")
+              echo "clone rows: $rows"
+              [ "$rows" = "$(printf '101\t101')" ]
+              sql "ADMIN CHECK TABLE pitr.rows;"
+      # The clone is applied by a script, so chainsaw doesn't remove it; it must
+      # go before s3-store, which can't be deleted while an Instance uses it.
+      cleanup:
+        - delete:
+            ref:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              name: clone
+        - wait:
+            apiVersion: core.openeverest.io/v1alpha1
+            kind: Instance
+            name: clone
+            timeout: 5m
+            for:
+              deletion: {}
+
+    - name: delete-stops-the-log-backup
+      try:
+        - delete:
+            ref:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              name: test-instance
+        - wait:
+            apiVersion: core.openeverest.io/v1alpha1
+            kind: Instance
+            name: test-instance
+            for:
+              deletion: {}
+        - error:
+            file: 60-error.yaml

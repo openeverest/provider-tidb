@@ -1,16 +1,20 @@
-# TiDB BR (snapshot) BackupClass.
+# TiDB BR BackupClass.
 # Source of truth for the generated BackupClass manifest.
-displayName: "TiDB BR (snapshot)"
+displayName: "TiDB BR"
 description: |
-  Full snapshot backups of a TiDB cluster to S3-compatible storage, taken by the
-  TiDB Operator's BR (Backup & Restore) tooling. Managed by the provider.
+  Full snapshot backups of a TiDB cluster to S3-compatible storage, and a
+  continuous log backup for point-in-time recovery, taken by the TiDB
+  Operator's BR (Backup & Restore) tooling. Managed by the provider.
 executionMode: ProviderManaged
 supportedProviders:
   - tidb
 providerManaged:
-  # PITR (log backup) is tracked separately; snapshot-only for now.
-  supportsPITR: false
-  limits: {}
+  # Point-in-time recovery runs a BR log backup (backupMode: log) to the storage
+  # that enables it, and restores with restoreMode: pitr.
+  supportsPITR: true
+  limits:
+    # TiDB runs one log backup per cluster.
+    maxPITREnabledStorages: 1
 parametersSchema:
   openAPIV3Schema: BrBackupParameters
 restoreParametersSchema:
