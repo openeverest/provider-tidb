@@ -64,8 +64,7 @@ Optional integrations, needed only for the features that use them:
 
 | Feature | Requires | Tested with |
 |---|---|---|
-| [Monitoring](#monitoring) → Prometheus | Prometheus Operator (`PodMonitor`, `monitoring.coreos.com/v1`) | kube-prometheus-stack |
-| [Monitoring](#monitoring) → VictoriaMetrics | VictoriaMetrics Operator (`VMPodScrape`, `operator.victoriametrics.com/v1beta1`) | `v0.54.1` |
+| [Monitoring](#monitoring) | A monitoring extension, e.g. [monitoring-victoriametrics](https://github.com/openeverest/monitoring-victoriametrics) or [monitoring-prometheus](https://github.com/openeverest/monitoring-prometheus) | monitoring-victoriametrics |
 | [Certificates from cert-manager](#certificates-from-cert-manager) | cert-manager | `v1.20.2` |
 | [Backups and restores](#capabilities) | S3-compatible object storage | AWS S3 API, SeaweedFS, Linode Object Storage |
 
@@ -84,7 +83,7 @@ is covered under [Installation](#installation).
 | Custom configuration | ✅ | Inline TOML `config` per component |
 | Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
 | Version upgrades | ✅ | Change the version bundle; the operator rolls PD → TiFlash → TiKV → TiDB. TiProxy has its own version line. Downgrades are rejected |
-| Monitoring | ✅ | Prometheus `PodMonitor` or VictoriaMetrics `VMPodScrape` for PD, TiKV, TiDB, TiFlash and TiProxy (see [Monitoring](#monitoring)) |
+| Monitoring | ✅ | Metrics of PD, TiKV, TiDB, TiFlash and TiProxy sent to the `MonitoringDestination`s in `spec.monitoring.destinations` (see [Monitoring](#monitoring)) |
 | TLS | ✅ | mTLS between components and TLS for MySQL clients, with provider-issued certificates (see [Security](#security)) |
 | Connection proxy | ✅ | Optional TiProxy: session balancing and connections that survive TiDB restarts and scaling (see [TiProxy](#tiproxy)) |
 
@@ -186,14 +185,26 @@ helm uninstall provider-tidb --namespace everest-system
 Uninstalling the chart does **not** delete running `Instance` resources, the TiDB CRDs, or any
 data.
 
+### Upgrading from 0.2.x
+
+- **Breaking:** the **Monitoring** toggles (`spec.topology.parameters.monitoring`) and the
+  chart's `podMonitor.labels` and `vmPodScrape.labels` are gone, and the provider no longer
+  creates `PodMonitor`s or `VMPodScrape`s. List a `MonitoringDestination` in
+  `spec.monitoring.destinations` instead (see [Monitoring](#monitoring)). The scrape objects an
+  Instance already has (`<instance>-metrics`, `<instance>-vm-metrics`) are left in place until
+  the Instance is deleted; delete them by hand once a destination scrapes the Instance, or the
+  Instance is scraped twice.
+- The chart grants the provider read access to the monitoring classes, destinations and
+  bindings and to namespaces, and drops its `PodMonitor` and `VMPodScrape` permissions.
+
 ### Upgrading from 0.1.x
 
 - Existing Instances are left as they are: the provider does not restart their pods or change
   their TiDB resources, and they stay plaintext. TLS ([Security](#security)) can only be chosen
   when an Instance is created; new Instances get it by default in the UI.
 - The chart grants the provider new permissions: ServiceAccounts, Roles and RoleBindings (for the
-  account BR jobs run as), `PodMonitor`s, `VMPodScrape`s and cert-manager `Issuer`s and
-  `Certificate`s. `helm upgrade --reuse-values` works.
+  account BR jobs run as) and cert-manager `Issuer`s and `Certificate`s.
+  `helm upgrade --reuse-values` works.
 - BR backup and restore jobs could not start in 0.1.x
   ([#63](https://github.com/openeverest/provider-tidb/issues/63)). A `Backup` or `Restore` still
   `Running` from before the upgrade keeps waiting for a job that cannot start; delete it and
@@ -453,51 +464,42 @@ roll. Like the gates, it stays when TiProxy is turned off.
 
 ### Monitoring
 
-PD, TiKV, TiDB, TiFlash and TiProxy serve Prometheus metrics natively, so no exporter is needed.
-The **Monitoring** section of the UI (`spec.topology.parameters.monitoring`) has a toggle per
-monitoring system; each makes the provider create one scrape object for every component's
-metrics endpoint (`/metrics`, and `/api/metrics` on TiProxy's API port):
-
-| Toggle | Creates | Requires |
-|---|---|---|
-| **Prometheus** (`monitoring.prometheus`) | `PodMonitor` `<instance>-metrics` | [Prometheus Operator](https://prometheus-operator.dev/) |
-| **VictoriaMetrics** (`monitoring.victoriaMetrics`) | `VMPodScrape` `<instance>-vm-metrics` | [VictoriaMetrics Operator](https://docs.victoriametrics.com/operator/) |
+Monitoring is configured through `MonitoringDestination`s: each entry of
+`spec.monitoring.destinations` sends the instance's metrics to one destination.
 
 ```yaml
 spec:
-  topology:
-    type: cluster
-    parameters:
-      monitoring:
-        prometheus:
-          enabled: true
-          interval: 30s                       # optional; defaults to the global scrape interval
-          podMonitorLabels:                   # optional; see below
-            release: kube-prometheus-stack
-        victoriaMetrics:
-          enabled: true
-          interval: 30s                       # optional
-          podScrapeLabels: {}                 # optional; see below
+  monitoring:
+    destinations:
+      - name: metrics
+        destinationRef:
+          name: victoriametrics
 ```
 
-Both objects are owned by the Instance and removed when their toggle is turned off. They carry
-the `app.kubernetes.io/managed-by: everest` and `app.kubernetes.io/instance: <instance>` labels
-the [Metrics plugin](https://github.com/openeverest/plugin-metrics) finds a `PodMonitor` by, so its
-*Metrics* tab shows the built-in TiDB dashboard for Prometheus. Validation rejects turning a
-toggle on while its CRD is not installed.
+The provider declares its monitoring contract in
+[definition/monitoring.yaml](definition/monitoring.yaml): PD, TiKV, TiDB, TiFlash and TiProxy
+serve Prometheus metrics natively, so no exporter is run and there is no operator-native
+integration such as PMM. The provider publishes one endpoint per metrics port of every component
+that has a ready pod in `status.monitoring.sources`, whether or not a destination is listed:
 
-A monitoring system only scrapes the objects its selector matches. kube-prometheus-stack, for
-example, selects `PodMonitor`s labelled `release: <its release name>`; a `VMAgent` with
-`selectAllByDefault: true` takes every `VMPodScrape`. Set the labels once
-for every Instance with the chart's `podMonitor.labels` / `vmPodScrape.labels`, or per Instance
-with `podMonitorLabels` / `podScrapeLabels` (which win on conflicts).
+| Component | Kind | Port | Path |
+|---|---|---|---|
+| PD | `tidb.pd` | `client` | `/metrics` |
+| TiKV | `tikv` | `status` | `/metrics` |
+| TiDB | `tidb` | `status` | `/metrics` |
+| TiFlash | `tidb.tiflash` | `metrics`, `proxy-metrics` | `/metrics` |
+| TiProxy | `tidb.tiproxy` | `api` | `/api/metrics` |
 
-> [!NOTE]
-> Turn on the toggle of the monitoring system you run; the provider creates its scrape object
-> itself rather than relying on a VictoriaMetrics Operator converting the `PodMonitor`. If your
-> VictoriaMetrics Operator does convert Prometheus Operator objects, it also turns the
-> `PodMonitor` into a `VMPodScrape` named `<instance>-metrics`, so with both toggles on a
-> `VMAgent` scrapes every component twice.
+The class's extension (for example
+[monitoring-victoriametrics](https://github.com/openeverest/monitoring-victoriametrics) or
+[monitoring-prometheus](https://github.com/openeverest/monitoring-prometheus)) creates the scrape
+resources from these endpoints. With [mTLS](#security) every metrics port requires a client
+certificate, so the endpoints are https and name the cluster client certificate
+(`<instance>-cluster-client-secret`) the scraper presents, and the server name each component's
+certificate carries (`<instance>-<component>`).
+
+`kubectl get monitoringbindings` lists one binding per destination entry, and the
+instance's `MonitoringConfigured` condition reports whether every entry is configured.
 
 ### Security
 
@@ -543,8 +545,7 @@ mysql -h <host> -P 4000 -u root -p --ssl-mode=VERIFY_IDENTITY --ssl-ca=ca.crt
 TiDB still accepts plaintext connections unless you require TLS, e.g. with
 `ALTER USER ... REQUIRE SSL` or by setting `require_secure_transport`.
 
-With mTLS, the [monitoring](#monitoring) `PodMonitor` and `VMPodScrape` scrape over https
-with the cluster client certificate.
+With mTLS, [monitoring](#monitoring) scrapes over https with the cluster client certificate.
 
 > [!NOTE]
 > The certificates are valid for ten years and are not rotated yet: TiDB Operator does not

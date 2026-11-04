@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"slices"
 	"strconv"
@@ -24,6 +25,22 @@ import (
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
+// topologyInstance returns the test Instance with the cluster topology and,
+// when params is not nil, its parameters.
+func topologyInstance(t *testing.T, params any) *corev1alpha1.Instance {
+	t.Helper()
+	in := testInstance("8.5.2")
+	in.Spec.Topology = &corev1alpha1.TopologySpec{Type: "cluster"}
+	if params != nil {
+		raw, err := json.Marshal(params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		in.Spec.Topology.Parameters = &runtime.RawExtension{Raw: raw}
+	}
+	return in
+}
+
 func tlsTopology(clusterTLS, clientTLS bool) cluster.ClusterTopologyParameters {
 	return cluster.ClusterTopologyParameters{TLS: &cluster.TLS{Cluster: clusterTLS, Client: clientTLS}}
 }
@@ -37,7 +54,7 @@ func tlsContext(t *testing.T, params any, objs ...client.Object) (*controller.Co
 		}
 	}
 	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
-	return controller.NewContext(context.Background(), cl, monitoredInstance(t, params), common.ProviderName), cl
+	return controller.NewContext(context.Background(), cl, topologyInstance(t, params), common.ProviderName), cl
 }
 
 func testCluster() *tidbcorev1.Cluster {

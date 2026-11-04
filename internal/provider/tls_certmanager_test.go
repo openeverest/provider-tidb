@@ -51,7 +51,7 @@ func certManagerContext(t *testing.T, params any, withCRDs bool, objs ...client.
 	cl := fake.NewClientBuilder().WithScheme(scheme).
 		WithRESTMapper(testrestmapper.TestOnlyStaticRESTMapper(mapperScheme)).
 		WithObjects(objs...).Build()
-	return controller.NewContext(context.Background(), cl, monitoredInstance(t, params), common.ProviderName), cl
+	return controller.NewContext(context.Background(), cl, topologyInstance(t, params), common.ProviderName), cl
 }
 
 func listCertificates(t *testing.T, cl client.Client) map[string]cmapi.Certificate {
