@@ -1,0 +1,15 @@
+# The full backup a point-in-time restore starts from: taken after the log
+# backup started, to the storage it writes to.
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+metadata:
+  name: pitr-base
+spec:
+  origin:
+    type: Instance
+    instanceRef:
+      name: test-instance
+  classRef:
+    name: br
+  storageRef:
+    name: s3-store

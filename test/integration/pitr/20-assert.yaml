@@ -1,0 +1,6 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+metadata:
+  name: pitr-base
+status:
+  state: Succeeded

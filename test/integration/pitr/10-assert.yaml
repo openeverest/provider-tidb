@@ -1,0 +1,30 @@
+# The log backup runs, and with no full backup since it started nothing is
+# restorable yet.
+apiVersion: br.pingcap.com/v1alpha1
+kind: Backup
+metadata:
+  name: test-instance-pitr
+  annotations:
+    tidb.openeverest.io/backup-storage: s3-store
+spec:
+  backupMode: log
+  logSubcommand: log-start
+  serviceAccount: openeverest-tidb-backup-manager
+  s3:
+    bucket: e2e-backups
+    (ends_with(prefix, '/test-instance/_log')): true
+status:
+  phase: Running
+  (commitTs != null): true
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+status:
+  backup:
+    storages:
+      - name: s3-store
+        pitr:
+          state: Unavailable
+          reason: NoBaseBackup

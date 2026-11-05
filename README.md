@@ -96,7 +96,7 @@ Stateful components (PD, TiKV, TiFlash) additionally report:
 | Storage expansion | ✅ | Grow `storage.size`; shrinking is rejected. Needs an expandable StorageClass (see below) |
 | Backups (on demand) | ✅ | Full snapshot to S3-compatible storage (BR) |
 | Backups (scheduled) | ✅ | Cron schedules per storage with count or time retention (see below) |
-| Point-in-time recovery | ❌ | Planned |
+| Point-in-time recovery | ✅ | Continuous log backup to one storage; restore a point of it into a new Instance (see [Point-in-time recovery](#point-in-time-recovery)) |
 | Restore | ✅ | Into an existing Instance, or seed a new one via `spec.dataSource` |
 
 See [ROADMAP.md](ROADMAP.md) for the planned work.
@@ -280,6 +280,72 @@ therefore has the source's root password; change it with `ALTER USER` and update
 `<instance>-tidb-root` if they should differ. For backups taken by an earlier provider version the
 source Instance's current root password is used, and if that Instance is gone the Restore's message
 says the password is unknown.
+
+### Point-in-time recovery
+
+Enable it on one storage of the Instance (TiDB runs one log backup per cluster):
+
+```yaml
+spec:
+  backup:
+    enabled: true
+    classRef: {name: br}
+    storages:
+      - storageRef: {name: my-s3}
+        pitr: {enabled: true}
+```
+
+Once the cluster is ready the provider starts a BR log backup (`backupMode: log`), the
+`backups.br.pingcap.com` resource `<instance>-pitr`, that keeps running and writes TiKV's change
+log to `<namespace>/<instance>/_log` in the bucket. A point-in-time restore starts from a full
+backup taken *after* the log backup started, so take one (on demand or from a schedule) to the same
+storage. `status.backup.storages[].pitr` on the Instance then reports the restorable window and the
+health of the log backup:
+
+| `state` / `reason` | Meaning |
+|---|---|
+| `Available` / `WindowAvailable` | Every point from `earliestRestorableTime` (the oldest full backup the log covers) to `latestRestorableTime` (the log backup's checkpoint) is restorable |
+| `Available` / `LogBackupLagging` | As above, but the checkpoint is over 15 minutes old: the log backup is stuck. Check the TiKV logs and `br log status` |
+| `Unavailable` / `LogBackupStarting` | The log backup is waiting for the cluster, starting, or moving to another storage |
+| `Unavailable` / `NoBaseBackup` | No full backup to that storage since the log backup started yet |
+| `Unavailable` / `LogBackupFailed` | The log backup failed to start; the message carries BR's reason |
+
+Restore a point into a **new** Instance by seeding it from the stream; `latest` restores up to the
+checkpoint:
+
+```yaml
+spec:
+  dataSource:
+    type: PointInTime
+    pointInTime:
+      source:
+        instanceRef: {name: my-tidb}
+        storageRef: {name: my-s3}
+      recoveryTarget: date        # or latest
+      date: "2026-11-04T10:15:00Z"
+  backup:
+    enabled: true
+    classRef: {name: br}
+    storages:
+      - storageRef: {name: my-s3}
+```
+
+The provider restores the newest full backup at or before that point and replays the log up to
+it. A date before the window fails the restore; one past the checkpoint waits until the log backup
+reaches it. The clone gets the root password recorded with that full backup.
+
+> [!IMPORTANT]
+> BR restores a point in time only into an empty cluster that runs no log backup, so an Instance
+> can't be rolled back in place: a `Restore` of type `PointInTime` into the Instance that writes the
+> stream fails and says so. BR before TiDB v8.5.5 also refuses *any* restore into a cluster whose log
+> backup runs, so a `Restore` into an Instance with point-in-time recovery on fails and asks to turn
+> it off first. A clone that enables point-in-time recovery itself starts its own log backup only
+> after it has been seeded.
+>
+> Turning point-in-time recovery off, or moving it to another storage, stops the log backup and
+> deletes its log data, which nothing can restore from once the stream is off. Full backups are
+> kept. The log is not truncated while it runs, so it grows until point-in-time recovery is turned
+> off.
 
 > [!NOTE]
 > Each component group expands into one instance resource per replica — e.g. `spec.components.tidb.replicas: 2`

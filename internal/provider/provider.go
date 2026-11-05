@@ -75,9 +75,24 @@ func New() *Provider {
 				controller.WatchExternal(&tidbcorev1.TiProxy{}, handler.EnqueueRequestsFromMapFunc(instanceForCluster)),
 				// Re-reconcile an Instance when its seeding Restore (.spec.dataSource) changes.
 				controller.WatchExternal(&backupv1alpha1.Restore{}, handler.EnqueueRequestsFromMapFunc(instanceForRestore)),
+				// The log backup's checkpoint and the full backups it covers make up the restorable window.
+				controller.WatchExternal(&tidbbrv1.Backup{}, handler.EnqueueRequestsFromMapFunc(instanceForBRBackup)),
 			},
 		},
 	}
+}
+
+// instanceForBRBackup maps a BR Backup to the Instance of the cluster it backs up.
+func instanceForBRBackup(_ context.Context, obj client.Object) []reconcile.Request {
+	backup, ok := obj.(*tidbbrv1.Backup)
+	if !ok || backup.Spec.BR == nil || backup.Spec.BR.Cluster == "" {
+		return nil
+	}
+	namespace := backup.Spec.BR.ClusterNamespace
+	if namespace == "" {
+		namespace = backup.Namespace
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: namespace, Name: backup.Spec.BR.Cluster}}}
 }
 
 // instanceForRestore maps a Restore CR to the Instance it targets, so the
@@ -125,7 +140,16 @@ func (p *Provider) Status(c *controller.Context) (controller.Status, error) {
 // has torn it down. The operator finds a cluster's groups and members by name,
 // so an Instance created again under the same name while the old cluster was
 // still being torn down had its new TiKV taken offline by that teardown.
+// A log backup is stopped first: stopping it goes through PD.
 func (p *Provider) Cleanup(c *controller.Context) error {
+	stopped, err := stopLogBackup(c)
+	if err != nil {
+		return err
+	}
+	if !stopped {
+		return controller.WaitFor(fmt.Sprintf("waiting for TiDB Operator to stop log backup %q", logBackupName(c.Name())))
+	}
+
 	cluster := &tidbcorev1.Cluster{}
 	found, err := c.Exists(cluster, c.Name())
 	if err != nil {

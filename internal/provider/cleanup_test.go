@@ -12,6 +12,7 @@ import (
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
+	tidbbrv1 "github.com/pingcap/tidb-operator/api/v2/br/v1alpha1"
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
 	"github.com/openeverest/provider-tidb/internal/common"
@@ -20,7 +21,7 @@ import (
 func cleanupContext(t *testing.T, objs ...client.Object) (*controller.Context, client.Client) {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	for _, install := range []func(*runtime.Scheme) error{corev1alpha1.AddToScheme, tidbcorev1.Install} {
+	for _, install := range []func(*runtime.Scheme) error{corev1alpha1.AddToScheme, tidbcorev1.Install, tidbbrv1.Install} {
 		if err := install(scheme); err != nil {
 			t.Fatal(err)
 		}

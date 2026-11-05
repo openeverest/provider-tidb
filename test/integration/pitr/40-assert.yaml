@@ -1,0 +1,7 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: rollback
+status:
+  state: Failed
+  (contains(message, 'Create a new Instance')): true

@@ -6,16 +6,18 @@ metadata:
   name: br
 spec:
   description: |
-    Full snapshot backups of a TiDB cluster to S3-compatible storage, taken by the
-    TiDB Operator's BR (Backup & Restore) tooling. Managed by the provider.
-  displayName: TiDB BR (snapshot)
+    Full snapshot backups of a TiDB cluster to S3-compatible storage, and a
+    continuous log backup for point-in-time recovery, taken by the TiDB
+    Operator's BR (Backup & Restore) tooling. Managed by the provider.
+  displayName: TiDB BR
   executionMode: ProviderManaged
   parametersSchema:
     openAPIV3Schema:
       type: object
   providerManaged:
-    limits: {}
-    supportsPITR: false
+    limits:
+      maxPITREnabledStorages: 1
+    supportsPITR: true
   restoreParametersSchema:
     openAPIV3Schema:
       type: object

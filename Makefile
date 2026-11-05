@@ -178,6 +178,10 @@ test-integration-datasource: ## Run data-source (new instance from backup) integ
 test-integration-e2e: ## Run end-to-end tests against the real TiDB Operator (see deploy-provider-e2e).
 	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/e2e
 
+.PHONY: test-integration-pitr
+test-integration-pitr: ## Run point-in-time recovery tests against the real TiDB Operator (see deploy-provider-e2e).
+	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/pitr
+
 .PHONY: load-image
 load-image: ## Import the provider image (IMG) into the k3d cluster.
 	k3d image import ${IMG} -c ${K3D_CLUSTER_NAME}

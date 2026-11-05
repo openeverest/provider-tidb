@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	backupv1alpha1 "github.com/openeverest/openeverest/v2/api/backup/v1alpha1"
@@ -49,6 +50,43 @@ func backupPrefix(namespace, instance, backupName string) string {
 	return fmt.Sprintf("%s/%s/%s", namespace, instance, backupName)
 }
 
+// brS3Storage points BR at prefix in an OpenEverest S3 BackupStorage, reading
+// credentials from the BR-format Secret secretName.
+func brS3Storage(s3 *backupv1alpha1.BackupStorageS3Spec, prefix, secretName string) *tidbbrv1.S3StorageProvider {
+	return &tidbbrv1.S3StorageProvider{
+		Provider:   brS3Provider(s3.EndpointURL),
+		Region:     s3.Region,
+		Bucket:     s3.Bucket,
+		Endpoint:   s3.EndpointURL,
+		Prefix:     prefix,
+		SecretName: secretName,
+	}
+}
+
+// ensureBRCredentials writes the BackupStorage credentials into the Secret
+// name, owned by owner. BR reads S3 credentials from access_key/secret_key,
+// which differ from OpenEverest's AWS_* keys.
+func ensureBRCredentials(c *controller.Context, owner client.Object, name string, storage *backupv1alpha1.BackupStorage) error {
+	accessKeyID, secretAccessKey, err := c.BackupStorageCredentials(storage)
+	if err != nil {
+		return err
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: c.Namespace()},
+		Type:       corev1.SecretTypeOpaque,
+	}
+	if _, err := controllerutil.CreateOrUpdate(c.Context(), c.Client(), secret, func() error {
+		secret.Data = map[string][]byte{
+			"access_key": []byte(accessKeyID),
+			"secret_key": []byte(secretAccessKey),
+		}
+		return controllerutil.SetControllerReference(owner, secret, c.Client().Scheme())
+	}); err != nil {
+		return fmt.Errorf("ensure BR credentials secret: %w", err)
+	}
+	return nil
+}
+
 // SyncBackup reconciles a Backup CR into a br.pingcap.com Backup (full snapshot)
 // with inlined S3 storage and a BR-format credentials Secret.
 func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Backup) (controller.BackupExecutionStatus, error) {
@@ -74,25 +112,8 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 		}, nil
 	}
 
-	accessKeyID, secretAccessKey, err := c.BackupStorageCredentials(storage)
-	if err != nil {
+	if err := ensureBRCredentials(c, backup, brSecretName(backup.Name), storage); err != nil {
 		return controller.BackupExecutionStatus{}, err
-	}
-
-	// BR reads S3 credentials from a Secret keyed access_key/secret_key, which
-	// differ from OpenEverest's AWS_* keys — translate into a BR-format Secret.
-	brSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: brSecretName(backup.Name), Namespace: backup.Namespace},
-		Type:       corev1.SecretTypeOpaque,
-	}
-	if _, err := controllerutil.CreateOrUpdate(c.Context(), c.Client(), brSecret, func() error {
-		brSecret.Data = map[string][]byte{
-			"access_key": []byte(accessKeyID),
-			"secret_key": []byte(secretAccessKey),
-		}
-		return controllerutil.SetControllerReference(backup, brSecret, c.Client().Scheme())
-	}); err != nil {
-		return controller.BackupExecutionStatus{}, fmt.Errorf("ensure BR credentials secret: %w", err)
 	}
 
 	if err := ensureBackupManagerRBAC(c, backup.Namespace); err != nil {
@@ -111,14 +132,7 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 		brBackup.Spec.Type = tidbbrv1.BackupTypeFull
 		brBackup.Spec.Mode = tidbbrv1.BackupModeSnapshot
 		brBackup.Spec.CleanPolicy = cleanPolicyFor(backup.Spec.DeletionPolicy)
-		brBackup.Spec.S3 = &tidbbrv1.S3StorageProvider{
-			Provider:   brS3Provider(storage.Spec.S3.EndpointURL),
-			Region:     storage.Spec.S3.Region,
-			Bucket:     storage.Spec.S3.Bucket,
-			Endpoint:   storage.Spec.S3.EndpointURL,
-			Prefix:     backupPrefix(c.Namespace(), c.Name(), backup.Name),
-			SecretName: brSecret.Name,
-		}
+		brBackup.Spec.S3 = brS3Storage(storage.Spec.S3, backupPrefix(c.Namespace(), c.Name(), backup.Name), brSecretName(backup.Name))
 		brBackup.Spec.BR = &tidbbrv1.BRConfig{
 			Cluster:          c.Name(),
 			ClusterNamespace: c.Namespace(),
@@ -157,10 +171,13 @@ func (p *Provider) CleanupBackup(c *controller.Context, backup *backupv1alpha1.B
 // the runtime routes through the same Restore CR.
 func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Restore) (controller.RestoreExecutionStatus, error) {
 	ds := restore.Spec.DataSource
-	if ds.Type != backupv1alpha1.DataSourceTypeBackup || ds.Backup == nil {
+	switch {
+	case ds.Type == backupv1alpha1.DataSourceTypePointInTime && ds.PointInTime != nil:
+		return syncPointInTimeRestore(c, restore)
+	case ds.Type != backupv1alpha1.DataSourceTypeBackup || ds.Backup == nil:
 		return controller.RestoreExecutionStatus{
 			State:   backupv1alpha1.RestoreStateFailed,
-			Message: "Only Backup data sources are supported (point-in-time recovery is not yet implemented)",
+			Message: fmt.Sprintf("Unsupported data source type %q", ds.Type),
 		}, nil
 	}
 
@@ -198,6 +215,17 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 		return controller.RestoreExecutionStatus{}, fmt.Errorf("get cluster: %w", err)
 	}
 
+	started, err := c.Exists(&tidbbrv1.Restore{}, restore.Name)
+	if err != nil {
+		return controller.RestoreExecutionStatus{}, fmt.Errorf("get BR restore: %w", err)
+	}
+	if !started {
+		blocked, isBlocked, err := restoreBlockedByLogBackup(c)
+		if err != nil || isBlocked {
+			return blocked, err
+		}
+	}
+
 	storage, err := c.BackupStorage(srcBackup.Spec.StorageRef.Name)
 	if err != nil {
 		return controller.RestoreExecutionStatus{}, err
@@ -208,27 +236,12 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 			Message: fmt.Sprintf("BackupStorage %q is not S3-backed", storage.Name),
 		}, nil
 	}
-	accessKeyID, secretAccessKey, err := c.BackupStorageCredentials(storage)
-	if err != nil {
-		return controller.RestoreExecutionStatus{}, err
-	}
-
 	// BR reads the backup from the same object-key prefix SyncBackup wrote it to,
 	// derived from the SOURCE backup's identity (so clones read the source data).
 	prefix := backupPrefix(srcBackup.Namespace, srcBackup.Spec.Origin.InstanceRef.Name, srcBackup.Name)
 
-	brSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: brSecretName(restore.Name), Namespace: restore.Namespace},
-		Type:       corev1.SecretTypeOpaque,
-	}
-	if _, err := controllerutil.CreateOrUpdate(c.Context(), c.Client(), brSecret, func() error {
-		brSecret.Data = map[string][]byte{
-			"access_key": []byte(accessKeyID),
-			"secret_key": []byte(secretAccessKey),
-		}
-		return controllerutil.SetControllerReference(restore, brSecret, c.Client().Scheme())
-	}); err != nil {
-		return controller.RestoreExecutionStatus{}, fmt.Errorf("ensure BR credentials secret: %w", err)
+	if err := ensureBRCredentials(c, restore, brSecretName(restore.Name), storage); err != nil {
+		return controller.RestoreExecutionStatus{}, err
 	}
 
 	if err := ensureBackupManagerRBAC(c, restore.Namespace); err != nil {
@@ -242,14 +255,7 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 		brRestore.Spec.ServiceAccount = backupManagerName
 		brRestore.Spec.Type = tidbbrv1.BackupTypeFull
 		brRestore.Spec.Mode = tidbbrv1.RestoreModeSnapshot
-		brRestore.Spec.S3 = &tidbbrv1.S3StorageProvider{
-			Provider:   brS3Provider(storage.Spec.S3.EndpointURL),
-			Region:     storage.Spec.S3.Region,
-			Bucket:     storage.Spec.S3.Bucket,
-			Endpoint:   storage.Spec.S3.EndpointURL,
-			Prefix:     prefix,
-			SecretName: brSecret.Name,
-		}
+		brRestore.Spec.S3 = brS3Storage(storage.Spec.S3, prefix, brSecretName(restore.Name))
 		brRestore.Spec.BR = &tidbbrv1.BRConfig{
 			Cluster:          c.Name(),
 			ClusterNamespace: c.Namespace(),
@@ -259,21 +265,29 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 		return controller.RestoreExecutionStatus{}, fmt.Errorf("create or update BR restore: %w", err)
 	}
 
+	return restoreExecutionStatus(c, restore, brRestore, srcBackup)
+}
+
+// restoreExecutionStatus reports the BR Restore's progress. Once it succeeded
+// the Instance's root password follows the one srcBackup carries: the restore
+// brought back the source's mysql.user, root password included.
+func restoreExecutionStatus(c *controller.Context, restore *backupv1alpha1.Restore, brRestore *tidbbrv1.Restore,
+	srcBackup *backupv1alpha1.Backup) (controller.RestoreExecutionStatus, error) {
 	exec := brRestoreExecutionStatus(brRestore)
-	if exec.State == backupv1alpha1.RestoreStateSucceeded {
-		// The restore brought back the source's mysql.user, root password included.
-		completed := brRestore.Status.TimeCompleted.Time
-		if completed.IsZero() {
-			completed = restore.CreationTimestamp.Time
-		}
-		known, err := adoptRestoredRootPassword(c, restore, srcBackup, completed)
-		if err != nil {
-			return controller.RestoreExecutionStatus{}, err
-		}
-		if !known {
-			exec.Message = fmt.Sprintf("The root password of backup %q is unknown, so the connection Secret may not log in: "+
-				"root now has the password the backed-up cluster had", srcBackup.Name)
-		}
+	if exec.State != backupv1alpha1.RestoreStateSucceeded {
+		return exec, nil
+	}
+	completed := brRestore.Status.TimeCompleted.Time
+	if completed.IsZero() {
+		completed = restore.CreationTimestamp.Time
+	}
+	known, err := adoptRestoredRootPassword(c, restore, srcBackup, completed)
+	if err != nil {
+		return controller.RestoreExecutionStatus{}, err
+	}
+	if !known {
+		exec.Message = fmt.Sprintf("The root password of backup %q is unknown, so the connection Secret may not log in: "+
+			"root now has the password the backed-up cluster had", srcBackup.Name)
 	}
 	return exec, nil
 }

@@ -1,0 +1,37 @@
+# BR restored the full backup and replayed the log to the point, and the clone
+# then started its own log backup.
+apiVersion: br.pingcap.com/v1alpha1
+kind: Restore
+metadata:
+  name: clone-datasource
+  annotations:
+    tidb.openeverest.io/pitr-base-backup: pitr-base
+spec:
+  restoreMode: pitr
+  br:
+    cluster: clone
+  s3:
+    (ends_with(prefix, '/test-instance/_log')): true
+  pitrFullBackupStorageProvider:
+    s3:
+      (ends_with(prefix, '/test-instance/pitr-base')): true
+status:
+  phase: Complete
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: clone
+status:
+  phase: Ready
+  (conditions[?type == 'DataSourceReady']):
+    - status: "True"
+---
+apiVersion: br.pingcap.com/v1alpha1
+kind: Backup
+metadata:
+  name: clone-pitr
+spec:
+  backupMode: log
+status:
+  phase: Running

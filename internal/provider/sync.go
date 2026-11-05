@@ -130,6 +130,9 @@ func SyncTiDB(c *controller.Context) error {
 	if err := reconcileDataSource(c); err != nil {
 		return err
 	}
+	if err := syncLogBackup(c); err != nil {
+		return err
+	}
 	// Checked last: the error only flags the backup configuration, so the engine is fully synced first.
 	return validateBackupSchedules(c.Instance().Spec.Backup)
 }
