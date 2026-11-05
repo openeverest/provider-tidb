@@ -55,9 +55,12 @@ package provider
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch
 
-// Prometheus Operator PodMonitor the provider creates while monitoring is enabled.
-// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=get;list;watch;create;update;patch;delete
-// VictoriaMetrics Operator VMPodScrape the provider creates while monitoring is enabled.
-// +kubebuilder:rbac:groups=operator.victoriametrics.com,resources=vmpodscrapes,verbs=get;list;watch;create;update;patch;delete
+// The monitoring contract: the runtime reads the Instance's MonitoringBindings
+// with their destinations and classes, and the kube-system namespace for the
+// cluster identity it stamps on the published sources.
+// +kubebuilder:rbac:groups=monitoring.openeverest.io,resources=monitoringclasses;monitoringdestinations;monitoringbindings,verbs=get;list;watch
+// +kubebuilder:rbac:groups=monitoring.openeverest.io,resources=monitoringbindings/status,verbs=patch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get
+
 // cert-manager Issuers and Certificates the provider creates when tls.certManager is used.
 // +kubebuilder:rbac:groups=cert-manager.io,resources=issuers;certificates,verbs=get;list;watch;create;update;patch;delete

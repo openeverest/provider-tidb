@@ -2,366 +2,180 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"reflect"
-	"slices"
-	"strings"
 	"testing"
 
-	vmv1beta1 "github.com/VictoriaMetrics/operator/api/operator/v1beta1"
-	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	"k8s.io/apimachinery/pkg/api/meta/testrestmapper"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/ptr"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	commonv1alpha1 "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
-	"github.com/openeverest/provider-tidb/definition/topologies/cluster"
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
-func monitoredInstance(t *testing.T, params any) *corev1alpha1.Instance {
-	t.Helper()
-	in := testInstance("8.5.2")
-	in.Spec.Topology = &corev1alpha1.TopologySpec{Type: "cluster"}
-	if params != nil {
-		raw, err := json.Marshal(params)
-		if err != nil {
-			t.Fatal(err)
+// TestMonitoringContract keeps definition/monitoring.yaml, which core matches
+// bindings against, in step with what MonitoringSources publishes: every
+// component type serves its metrics natively under the kind published here.
+func TestMonitoringContract(t *testing.T) {
+	var contract corev1alpha1.ProviderMonitoring
+	readYAML(t, "../../definition/monitoring.yaml", &contract)
+	var definition struct {
+		Components map[string]struct {
+			Type string `json:"type"`
+		} `json:"components"`
+	}
+	readYAML(t, "../../definition/provider.yaml", &definition)
+
+	if len(contract.Integrations) != 0 {
+		t.Errorf("integrations = %v, want none: the provider renders no operator-native integration", contract.Integrations)
+	}
+	published := map[string]string{}
+	for _, cm := range componentMetrics {
+		published[definition.Components[cm.component].Type] = cm.kind
+	}
+	want := map[string]corev1alpha1.MonitoringComponentType{}
+	for typ, kind := range published {
+		want[typ] = corev1alpha1.MonitoringComponentType{Kind: kind, Metrics: corev1alpha1.MetricsSourceNative}
+	}
+	if !reflect.DeepEqual(contract.ComponentTypes, want) {
+		t.Errorf("componentTypes = %+v, want %+v", contract.ComponentTypes, want)
+	}
+	if len(published) != len(definition.Components) {
+		t.Errorf("metrics published for %d of the %d components", len(published), len(definition.Components))
+	}
+}
+
+func readyGroups(ready int32, components ...string) []client.Object {
+	var objs []client.Object
+	for _, component := range components {
+		meta := testCluster().ObjectMeta
+		meta.UID = ""
+		status := tidbcorev1.GroupStatus{ReadyReplicas: ready}
+		switch component {
+		case common.ComponentPD:
+			g := &tidbcorev1.PDGroup{ObjectMeta: meta}
+			g.Status.GroupStatus = status
+			objs = append(objs, g)
+		case common.ComponentTiKV:
+			g := &tidbcorev1.TiKVGroup{ObjectMeta: meta}
+			g.Status.GroupStatus = status
+			objs = append(objs, g)
+		case common.ComponentTiDB:
+			g := &tidbcorev1.TiDBGroup{ObjectMeta: meta}
+			g.Status.GroupStatus = status
+			objs = append(objs, g)
+		case common.ComponentTiFlash:
+			g := &tidbcorev1.TiFlashGroup{ObjectMeta: meta}
+			g.Status.GroupStatus = status
+			objs = append(objs, g)
+		case common.ComponentTiProxy:
+			g := &tidbcorev1.TiProxyGroup{ObjectMeta: meta}
+			g.Status.GroupStatus = status
+			objs = append(objs, g)
 		}
-		in.Spec.Topology.Parameters = &runtime.RawExtension{Raw: raw}
 	}
-	return in
+	return objs
 }
 
-func monitoringTopology(prometheus *cluster.Prometheus, vm *cluster.VictoriaMetrics) cluster.ClusterTopologyParameters {
-	return cluster.ClusterTopologyParameters{Monitoring: &cluster.Monitoring{Prometheus: prometheus, VictoriaMetrics: vm}}
+func mtlsCluster() *tidbcorev1.Cluster {
+	cluster := testCluster()
+	cluster.Spec.TLSCluster = &tidbcorev1.TLSCluster{Enabled: true}
+	return cluster
 }
 
-// scrapeTarget is what one endpoint of a scrape object reads.
-type scrapeTarget struct{ port, keep, path string }
-
-var wantScrapeTargets = []scrapeTarget{
-	{tidbcorev1.PDPortNameClient, "pd", "/metrics"},
-	{tidbcorev1.TiKVPortNameStatus, "tikv", "/metrics"},
-	{tidbcorev1.TiDBPortNameStatus, "tidb", "/metrics"},
-	{tidbcorev1.TiFlashPortNameMetrics, "tiflash", "/metrics"},
-	{tidbcorev1.TiFlashPortNameProxyStatus, "tiflash", "/metrics"},
-	{tidbcorev1.TiProxyPortNameAPI, "tiproxy", "/api/metrics"},
-}
-
-func wantScrapeLabels(release string) map[string]string {
-	return map[string]string{
-		"release":                      release,
-		"team":                         "db",
-		"app.kubernetes.io/managed-by": "everest",
-		"app.kubernetes.io/instance":   "orders",
-		controller.ProviderLabel:       common.ProviderName,
+func plainEndpoint(component, kind, port, path string) corev1alpha1.MetricsEndpoint {
+	return corev1alpha1.MetricsEndpoint{
+		Component: component,
+		Kind:      kind,
+		PodSelector: map[string]string{
+			controller.InstanceLabel:  "orders",
+			controller.ComponentLabel: component,
+		},
+		Port:   intstr.FromString(port),
+		Path:   path,
+		Scheme: "http",
 	}
 }
 
-var (
-	testScrapeSettings = scrapeSettings{
-		interval: "30s",
-		labels:   map[string]string{"release": "instance-prom", "app.kubernetes.io/instance": "spoofed"},
+func mtlsEndpoint(component, kind, port, path string) corev1alpha1.MetricsEndpoint {
+	ep := plainEndpoint(component, kind, port, path)
+	ep.Scheme = "https"
+	ep.TLS = &corev1alpha1.MetricsEndpointTLS{
+		TLSConfig: commonv1alpha1.TLSConfig{CA: &commonv1alpha1.CABundleSource{
+			SecretKeyRef: &commonv1alpha1.SecretKeyRef{Name: "orders-cluster-client-secret", Key: "ca.crt"},
+		}},
+		ServerName:                 "orders-" + component,
+		ClientCertificateSecretRef: &commonv1alpha1.SecretRef{Name: "orders-cluster-client-secret"},
 	}
-	testDefaultLabels = map[string]string{"release": "chart", "team": "db"}
-	wantPodSelector   = map[string]string{controller.ProviderLabel: common.ProviderName, controller.InstanceLabel: "orders"}
-)
-
-func TestBuildPodMonitor(t *testing.T) {
-	c := controller.NewContext(context.Background(), fake.NewClientBuilder().Build(), monitoredInstance(t, nil), common.ProviderName)
-	pm := buildPodMonitor(c, testScrapeSettings, testDefaultLabels).(*monitoringv1.PodMonitor)
-
-	if pm.Name != "orders-metrics" || pm.Namespace != testNamespace {
-		t.Errorf("name = %s/%s, want %s/orders-metrics", pm.Namespace, pm.Name, testNamespace)
-	}
-	if !reflect.DeepEqual(pm.Labels, wantScrapeLabels("instance-prom")) {
-		t.Errorf("labels = %v", pm.Labels)
-	}
-	if !reflect.DeepEqual(pm.Spec.Selector.MatchLabels, wantPodSelector) {
-		t.Errorf("selector = %v", pm.Spec.Selector.MatchLabels)
-	}
-	if !reflect.DeepEqual(pm.Spec.PodTargetLabels, []string{controller.ComponentLabel}) {
-		t.Errorf("podTargetLabels = %v", pm.Spec.PodTargetLabels)
-	}
-	var got []scrapeTarget
-	for _, ep := range pm.Spec.PodMetricsEndpoints {
-		if ep.Interval != "30s" {
-			t.Errorf("endpoint %s: interval %q", ptr.Deref(ep.Port, ""), ep.Interval)
-		}
-		if len(ep.RelabelConfigs) != 1 || ep.RelabelConfigs[0].Action != "keep" ||
-			!reflect.DeepEqual(ep.RelabelConfigs[0].SourceLabels, []monitoringv1.LabelName{componentPodLabelMeta}) {
-			t.Fatalf("endpoint %s: relabelings = %+v", ptr.Deref(ep.Port, ""), ep.RelabelConfigs)
-		}
-		got = append(got, scrapeTarget{ptr.Deref(ep.Port, ""), ep.RelabelConfigs[0].Regex, ep.Path})
-	}
-	if !reflect.DeepEqual(got, wantScrapeTargets) {
-		t.Errorf("endpoints = %v, want %v", got, wantScrapeTargets)
-	}
+	return ep
 }
 
-func TestBuildVMPodScrape(t *testing.T) {
-	c := controller.NewContext(context.Background(), fake.NewClientBuilder().Build(), monitoredInstance(t, nil), common.ProviderName)
-	ps := buildVMPodScrape(c, testScrapeSettings, testDefaultLabels).(*vmv1beta1.VMPodScrape)
-
-	if ps.Name != "orders-vm-metrics" || ps.Namespace != testNamespace {
-		t.Errorf("name = %s/%s, want %s/orders-vm-metrics", ps.Namespace, ps.Name, testNamespace)
-	}
-	if !reflect.DeepEqual(ps.Labels, wantScrapeLabels("instance-prom")) {
-		t.Errorf("labels = %v", ps.Labels)
-	}
-	if !reflect.DeepEqual(ps.Spec.Selector.MatchLabels, wantPodSelector) {
-		t.Errorf("selector = %v", ps.Spec.Selector.MatchLabels)
-	}
-	if !reflect.DeepEqual(ps.Spec.PodTargetLabels, []string{controller.ComponentLabel}) {
-		t.Errorf("podTargetLabels = %v", ps.Spec.PodTargetLabels)
-	}
-	var got []scrapeTarget
-	for _, ep := range ps.Spec.PodMetricsEndpoints {
-		if ep.Interval != "30s" {
-			t.Errorf("endpoint %s: interval %q", ptr.Deref(ep.Port, ""), ep.Interval)
-		}
-		if len(ep.RelabelConfigs) != 1 || ep.RelabelConfigs[0].Action != "keep" ||
-			!reflect.DeepEqual(ep.RelabelConfigs[0].SourceLabels, []string{componentPodLabelMeta}) ||
-			len(ep.RelabelConfigs[0].Regex) != 1 {
-			t.Fatalf("endpoint %s: relabelings = %+v", ptr.Deref(ep.Port, ""), ep.RelabelConfigs)
-		}
-		got = append(got, scrapeTarget{ptr.Deref(ep.Port, ""), ep.RelabelConfigs[0].Regex[0], ep.Path})
-	}
-	if !reflect.DeepEqual(got, wantScrapeTargets) {
-		t.Errorf("endpoints = %v, want %v", got, wantScrapeTargets)
-	}
-}
-
-func TestSyncMonitoring(t *testing.T) {
+func TestMonitoringSources(t *testing.T) {
+	all := []string{common.ComponentPD, common.ComponentTiKV, common.ComponentTiDB, common.ComponentTiFlash, common.ComponentTiProxy}
 	tests := []struct {
-		name        string
-		params      any
-		promEnv     string
-		vmEnv       string
-		wantApplied map[string]map[string]string // kind -> labels expected among its labels
-		wantDeleted []string
-		wantErr     string
+		name string
+		objs []client.Object
+		want []corev1alpha1.MetricsEndpoint
 	}{
-		{name: "no topology parameters", params: nil,
-			wantDeleted: []string{"orders-metrics", "orders-vm-metrics"}},
-		{name: "both disabled",
-			params:      monitoringTopology(&cluster.Prometheus{}, &cluster.VictoriaMetrics{}),
-			wantDeleted: []string{"orders-metrics", "orders-vm-metrics"}},
-		{name: "prometheus only, chart labels",
-			params:      monitoringTopology(&cluster.Prometheus{Enabled: true}, nil),
-			promEnv:     `{"release":"kube-prometheus-stack"}`,
-			wantApplied: map[string]map[string]string{"PodMonitor": {"release": "kube-prometheus-stack"}},
-			wantDeleted: []string{"orders-vm-metrics"}},
-		{name: "victoriametrics only, instance labels win",
-			params:      monitoringTopology(nil, &cluster.VictoriaMetrics{Enabled: true, PodScrapeLabels: map[string]string{"vm": "mine"}}),
-			vmEnv:       `{"vm":"chart","team":"db"}`,
-			wantApplied: map[string]map[string]string{"VMPodScrape": {"vm": "mine", "team": "db"}},
-			wantDeleted: []string{"orders-metrics"}},
-		{name: "both enabled",
-			params: monitoringTopology(&cluster.Prometheus{Enabled: true}, &cluster.VictoriaMetrics{Enabled: true}),
-			wantApplied: map[string]map[string]string{
-				"PodMonitor":  {"app.kubernetes.io/instance": "orders"},
-				"VMPodScrape": {"app.kubernetes.io/instance": "orders"},
-			}},
-		{name: "invalid chart labels",
-			params:  monitoringTopology(nil, &cluster.VictoriaMetrics{Enabled: true}),
-			vmEnv:   `not json`,
-			wantErr: "parsing VM_POD_SCRAPE_LABELS"},
+		{name: "no cluster yet"},
+		{
+			name: "groups without a ready pod",
+			objs: append(readyGroups(0, all...), testCluster()),
+		},
+		{
+			name: "plaintext, ready core components only",
+			objs: append(append(readyGroups(1, common.ComponentPD, common.ComponentTiKV, common.ComponentTiDB),
+				readyGroups(0, common.ComponentTiFlash)...), testCluster()),
+			want: []corev1alpha1.MetricsEndpoint{
+				plainEndpoint("pd", "tidb.pd", "client", "/metrics"),
+				plainEndpoint("tikv", "tikv", "status", "/metrics"),
+				plainEndpoint("tidb", "tidb", "status", "/metrics"),
+			},
+		},
+		{
+			name: "mutual TLS, every component",
+			objs: append(readyGroups(2, all...), mtlsCluster()),
+			want: []corev1alpha1.MetricsEndpoint{
+				mtlsEndpoint("pd", "tidb.pd", "client", "/metrics"),
+				mtlsEndpoint("tikv", "tikv", "status", "/metrics"),
+				mtlsEndpoint("tidb", "tidb", "status", "/metrics"),
+				mtlsEndpoint("tiflash", "tidb.tiflash", "metrics", "/metrics"),
+				mtlsEndpoint("tiflash", "tidb.tiflash", tidbcorev1.TiFlashPortNameProxyStatus, "/metrics"),
+				mtlsEndpoint("tiproxy", "tidb.tiproxy", "api", "/api/metrics"),
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(podMonitorLabelsEnv, tt.promEnv)
-			t.Setenv(vmPodScrapeLabelsEnv, tt.vmEnv)
-			applied := map[string]map[string]any{}
-			var deleted []string
-			cl := fake.NewClientBuilder().WithScheme(monitoringScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
-				Apply: func(_ context.Context, _ client.WithWatch, obj runtime.ApplyConfiguration, _ ...client.ApplyOption) error {
-					data, err := json.Marshal(obj)
-					if err != nil {
-						return err
-					}
-					var body map[string]any
-					if err := json.Unmarshal(data, &body); err != nil {
-						return err
-					}
-					applied[body["kind"].(string)] = body
-					return nil
-				},
-				Delete: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.DeleteOption) error {
-					deleted = append(deleted, obj.GetName())
-					return nil
-				},
-			}).Build()
-			c := controller.NewContext(context.Background(), cl, monitoredInstance(t, tt.params), common.ProviderName)
-
-			assertError(t, syncMonitoring(c), tt.wantErr)
-			if tt.wantErr != "" {
-				return
-			}
-			slices.Sort(deleted)
-			if !slices.Equal(deleted, tt.wantDeleted) {
-				t.Errorf("deleted %v, want %v", deleted, tt.wantDeleted)
-			}
-			if len(applied) != len(tt.wantApplied) {
-				t.Errorf("applied kinds %v, want %v", slices.Collect(func(yield func(string) bool) {
-					for k := range applied {
-						if !yield(k) {
-							return
-						}
-					}
-				}), tt.wantApplied)
-			}
-			for kind, wantLabels := range tt.wantApplied {
-				body, ok := applied[kind]
-				if !ok {
-					t.Errorf("no %s applied", kind)
-					continue
-				}
-				metadata := body["metadata"].(map[string]any)
-				labels := metadata["labels"].(map[string]any)
-				for k, v := range wantLabels {
-					if labels[k] != v {
-						t.Errorf("%s label %s = %v, want %s", kind, k, labels[k], v)
-					}
-				}
-				owners, _ := metadata["ownerReferences"].([]any)
-				if len(owners) != 1 || owners[0].(map[string]any)["kind"] != "Instance" {
-					t.Errorf("%s ownerReferences = %v, want the Instance", kind, owners)
-				}
+			c, _ := tlsContext(t, nil, tt.objs...)
+			got, err := New().MonitoringSources(c)
+			assertError(t, err, "")
+			if !reflect.DeepEqual(got.Metrics, tt.want) {
+				t.Errorf("metrics =\n%+v\nwant\n%+v", got.Metrics, tt.want)
 			}
 		})
 	}
 }
 
-func TestValidateTiDBMonitoring(t *testing.T) {
-	prom := func(p cluster.Prometheus) any { return monitoringTopology(&p, nil) }
-	vm := func(v cluster.VictoriaMetrics) any { return monitoringTopology(nil, &v) }
-	tests := []struct {
-		name        string
-		params      any
-		withoutProm bool
-		withoutVM   bool
-		wantErr     string
-	}{
-		{name: "no topology parameters", params: nil},
-		{name: "prometheus enabled", params: prom(cluster.Prometheus{Enabled: true, Interval: "15s",
-			PodMonitorLabels: map[string]string{"release": "kube-prometheus-stack"}}), withoutVM: true},
-		{name: "victoriametrics enabled", params: vm(cluster.VictoriaMetrics{Enabled: true, Interval: "1m",
-			PodScrapeLabels: map[string]string{"team": "db"}}), withoutProm: true},
-		{name: "both enabled", params: monitoringTopology(&cluster.Prometheus{Enabled: true}, &cluster.VictoriaMetrics{Enabled: true})},
-		{name: "disabled skips the checks", params: monitoringTopology(&cluster.Prometheus{Interval: "soon"},
-			&cluster.VictoriaMetrics{Interval: "soon"}), withoutProm: true, withoutVM: true},
-		{name: "invalid prometheus interval", params: prom(cluster.Prometheus{Enabled: true, Interval: "soon"}),
-			wantErr: `monitoring.prometheus.interval "soon" is not a valid duration`},
-		{name: "invalid victoriametrics interval", params: vm(cluster.VictoriaMetrics{Enabled: true, Interval: "soon"}),
-			wantErr: `monitoring.victoriaMetrics.interval "soon" is not a valid duration`},
-		{name: "invalid label key", params: prom(cluster.Prometheus{Enabled: true,
-			PodMonitorLabels: map[string]string{"bad key": "x"}}),
-			wantErr: `monitoring.prometheus.podMonitorLabels key "bad key"`},
-		{name: "invalid label value", params: vm(cluster.VictoriaMetrics{Enabled: true,
-			PodScrapeLabels: map[string]string{"team": strings.Repeat("x", 64)}}),
-			wantErr: `monitoring.victoriaMetrics.podScrapeLabels["team"] value`},
-		{name: "prometheus operator missing", params: prom(cluster.Prometheus{Enabled: true}), withoutProm: true,
-			wantErr: "monitoring.prometheus requires the Prometheus Operator: the PodMonitor CRD (monitoring.coreos.com/v1) is not installed"},
-		{name: "victoriametrics operator missing", params: vm(cluster.VictoriaMetrics{Enabled: true}), withoutVM: true,
-			wantErr: "monitoring.victoriaMetrics requires the VictoriaMetrics Operator: the VMPodScrape CRD (operator.victoriametrics.com/v1beta1) is not installed"},
-		{name: "malformed parameters", params: map[string]any{"monitoring": "yes"},
-			wantErr: "invalid topology parameters"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// The fake client's default mapper knows no CRDs; map the kinds the
-			// installed operators would serve.
-			installs := []func(*runtime.Scheme) error{corev1alpha1.AddToScheme, tidbcorev1.Install}
-			if !tt.withoutProm {
-				installs = append(installs, monitoringv1.AddToScheme)
+// An error reading the operator objects is returned, so the runtime keeps the
+// sources it published last instead of withdrawing them.
+func TestMonitoringSourcesReadError(t *testing.T) {
+	c, cl := tlsContext(t, nil, append(readyGroups(1, common.ComponentPD), testCluster())...)
+	failing := interceptor.NewClient(cl.(client.WithWatch), interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*tidbcorev1.PDGroup); ok {
+				return errors.New("boom")
 			}
-			if !tt.withoutVM {
-				installs = append(installs, vmv1beta1.AddToScheme)
-			}
-			mapperScheme := runtime.NewScheme()
-			for _, install := range installs {
-				if err := install(mapperScheme); err != nil {
-					t.Fatal(err)
-				}
-			}
-			cl := fake.NewClientBuilder().WithScheme(monitoringScheme(t)).
-				WithRESTMapper(testrestmapper.TestOnlyStaticRESTMapper(mapperScheme)).
-				WithObjects(testProvider()).Build()
-			c := controller.NewContext(context.Background(), cl, monitoredInstance(t, tt.params), common.ProviderName)
-			assertError(t, ValidateTiDB(c), tt.wantErr)
-		})
-	}
-}
-
-func monitoringScheme(t *testing.T) *runtime.Scheme {
-	t.Helper()
-	scheme := runtime.NewScheme()
-	for _, install := range []func(*runtime.Scheme) error{
-		corev1alpha1.AddToScheme, tidbcorev1.Install, monitoringv1.AddToScheme, vmv1beta1.AddToScheme,
-	} {
-		if err := install(scheme); err != nil {
-			t.Fatalf("building scheme: %v", err)
-		}
-	}
-	return scheme
-}
-
-// With mTLS between components every metrics endpoint serves https and wants
-// the cluster client certificate; each is verified by its service name.
-func TestScrapeObjectsOverClusterTLS(t *testing.T) {
-	c := controller.NewContext(context.Background(), fake.NewClientBuilder().Build(),
-		monitoredInstance(t, tlsTopology(true, false)), common.ProviderName)
-	secretKey := func(name, key string) string { return name + "/" + key }
-	want := func(component string) string {
-		return "https ca=" + secretKey("orders-cluster-client-secret", "ca.crt") +
-			" cert=" + secretKey("orders-cluster-client-secret", "tls.crt") +
-			" key=" + secretKey("orders-cluster-client-secret", "tls.key") +
-			" server=orders-" + component
-	}
-
-	pm := buildPodMonitor(c, scrapeSettings{}, nil).(*monitoringv1.PodMonitor)
-	for i, ep := range pm.Spec.PodMetricsEndpoints {
-		tls := ep.TLSConfig
-		if tls == nil || ep.Scheme == nil {
-			t.Fatalf("PodMonitor endpoint %d: no TLS", i)
-		}
-		got := ep.Scheme.String() + " ca=" + secretKey(tls.CA.Secret.Name, tls.CA.Secret.Key) +
-			" cert=" + secretKey(tls.Cert.Secret.Name, tls.Cert.Secret.Key) +
-			" key=" + secretKey(tls.KeySecret.Name, tls.KeySecret.Key) + " server=" + ptr.Deref(tls.ServerName, "")
-		if w := want(wantScrapeTargets[i].keep); got != w {
-			t.Errorf("PodMonitor endpoint %d: %s, want %s", i, got, w)
-		}
-	}
-
-	ps := buildVMPodScrape(c, scrapeSettings{}, nil).(*vmv1beta1.VMPodScrape)
-	for i, ep := range ps.Spec.PodMetricsEndpoints {
-		tls := ep.TLSConfig
-		if tls == nil {
-			t.Fatalf("VMPodScrape endpoint %d: no TLS", i)
-		}
-		got := ep.Scheme + " ca=" + secretKey(tls.CA.Secret.Name, tls.CA.Secret.Key) +
-			" cert=" + secretKey(tls.Cert.Secret.Name, tls.Cert.Secret.Key) +
-			" key=" + secretKey(tls.KeySecret.Name, tls.KeySecret.Key) + " server=" + tls.ServerName
-		if w := want(wantScrapeTargets[i].keep); got != w {
-			t.Errorf("VMPodScrape endpoint %d: %s, want %s", i, got, w)
-		}
-	}
-
-	// Client TLS alone leaves the metrics endpoints on plain http.
-	c = controller.NewContext(context.Background(), fake.NewClientBuilder().Build(),
-		monitoredInstance(t, tlsTopology(false, true)), common.ProviderName)
-	for _, ep := range buildPodMonitor(c, scrapeSettings{}, nil).(*monitoringv1.PodMonitor).Spec.PodMetricsEndpoints {
-		if ep.TLSConfig != nil || ep.Scheme != nil {
-			t.Errorf("client TLS only: endpoint %s has TLS", ptr.Deref(ep.Port, ""))
-		}
-	}
+			return cl.Get(ctx, key, obj, opts...)
+		},
+	})
+	c = controller.NewContext(context.Background(), failing, c.Instance(), common.ProviderName)
+	_, err := New().MonitoringSources(c)
+	assertError(t, err, "get pd group: boom")
 }
