@@ -264,7 +264,8 @@ kubectl get instances.core.openeverest.io my-tidb -o jsonpath='{.status.connecti
 ```
 
 The connection secret holds the MySQL `host`, `port` (4000, or 6000 through [TiProxy](#tiproxy)),
-`username` (`root`) and `password`.
+`username` (`root`) and `password`, and the same endpoint as a `uri`
+(`mysql://root:<password>@<host>:<port>/?tls=false`, with `tls=true` under [client TLS](#security)).
 The provider generates a random `root` password on first bootstrap (via the operator's
 `bootstrapSQL`), stores it in a Secret, and surfaces it here. Connect with any MySQL client:
 
