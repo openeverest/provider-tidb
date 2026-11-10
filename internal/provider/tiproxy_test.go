@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -203,7 +204,24 @@ func TestConnectionDetailsFollowTiProxy(t *testing.T) {
 			if got.Host != tt.wantHost || got.Port != tt.wantPort {
 				t.Errorf("endpoint = %s:%s, want %s:%s", got.Host, got.Port, tt.wantHost, tt.wantPort)
 			}
+			if want := "@" + tt.wantHost + ":" + tt.wantPort + "/?tls=false"; !strings.HasPrefix(got.URI, "mysql://root:") || !strings.HasSuffix(got.URI, want) {
+				t.Errorf("uri = %q, want mysql://root:…%s", got.URI, want)
+			}
 		})
+	}
+}
+
+func TestConnectionURIEscapesCredentials(t *testing.T) {
+	details := controller.ConnectionDetails{Username: "root", Password: "p@ss:w/rd#?", Host: "orders-tidb.db", Port: "4000"}
+	got := connectionURI(details, true)
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	password, _ := parsed.User.Password()
+	if parsed.Scheme != "mysql" || parsed.User.Username() != "root" || password != details.Password ||
+		parsed.Host != "orders-tidb.db:4000" || parsed.Query().Get("tls") != "true" {
+		t.Errorf("uri %q does not round-trip", got)
 	}
 }
 

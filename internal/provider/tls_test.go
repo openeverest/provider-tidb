@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -273,6 +274,9 @@ func TestConnectionDetailsCarryTheCA(t *testing.T) {
 		ca := connectionDetails(c).AdditionalProperties[tlsKeyCA]
 		if clientTLS != strings.HasPrefix(ca, "-----BEGIN CERTIFICATE-----") {
 			t.Errorf("client tls %v: ca.crt = %.30q", clientTLS, ca)
+		}
+		if uri := connectionDetails(c).URI; !strings.HasSuffix(uri, "?tls="+strconv.FormatBool(clientTLS)) {
+			t.Errorf("client tls %v: uri ends with %q", clientTLS, uri[strings.LastIndex(uri, "?"):])
 		}
 	}
 }
