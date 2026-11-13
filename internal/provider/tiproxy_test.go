@@ -9,15 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	vmv1beta1 "github.com/VictoriaMetrics/operator/api/operator/v1beta1"
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -612,31 +609,18 @@ func TestWithOptionalClientCerts(t *testing.T) {
 }
 
 func TestTiProxyMetricsEndpoints(t *testing.T) {
-	c, cl := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), 2, ""), tlsTopology(true, false))
+	c, cl := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), 2, ""), tlsTopology(true, false),
+		append(readyGroups(1, common.ComponentTiProxy), mtlsCluster())...)
 
-	pm := buildPodMonitor(c, scrapeSettings{}, nil).(*monitoringv1.PodMonitor)
-	i := slices.IndexFunc(pm.Spec.PodMetricsEndpoints, func(ep monitoringv1.PodMetricsEndpoint) bool {
-		return ep.RelabelConfigs[0].Regex == common.ComponentTiProxy
-	})
-	if i < 0 {
-		t.Fatal("the PodMonitor does not scrape tiproxy")
+	sources, err := New().MonitoringSources(c)
+	assertError(t, err, "")
+	if len(sources.Metrics) != 1 {
+		t.Fatalf("metrics = %+v, want the tiproxy endpoint only", sources.Metrics)
 	}
-	ep := pm.Spec.PodMetricsEndpoints[i]
-	if ptr.Deref(ep.Port, "") != "api" || ep.Path != "/api/metrics" || ep.Scheme == nil || ep.Scheme.String() != "https" ||
-		ep.TLSConfig == nil || ep.TLSConfig.Cert.Secret.Name != "orders-cluster-client-secret" {
+	ep := sources.Metrics[0]
+	if ep.Component != common.ComponentTiProxy || ep.Port.StrVal != "api" || ep.Path != "/api/metrics" || ep.Scheme != "https" ||
+		ep.TLS == nil || ep.TLS.ClientCertificateSecretRef == nil || ep.TLS.ClientCertificateSecretRef.Name != "orders-cluster-client-secret" {
 		t.Errorf("tiproxy endpoint = %+v, want https on the api port with the cluster client certificate", ep)
-	}
-
-	ps := buildVMPodScrape(c, scrapeSettings{}, nil).(*vmv1beta1.VMPodScrape)
-	j := slices.IndexFunc(ps.Spec.PodMetricsEndpoints, func(ep vmv1beta1.PodMetricsEndpoint) bool {
-		return ep.RelabelConfigs[0].Regex[0] == common.ComponentTiProxy
-	})
-	if j < 0 {
-		t.Fatal("the VMPodScrape does not scrape tiproxy")
-	}
-	vmEP := ps.Spec.PodMetricsEndpoints[j]
-	if ptr.Deref(vmEP.Port, "") != "api" || vmEP.Path != "/api/metrics" || vmEP.Scheme != "https" || vmEP.TLSConfig == nil {
-		t.Errorf("tiproxy endpoint = %+v, want https on the api port", vmEP)
 	}
 
 	// The scrape verifies TiProxy by the server name its cluster certificate carries.
@@ -644,7 +628,7 @@ func TestTiProxyMetricsEndpoints(t *testing.T) {
 	roots := x509.NewCertPool()
 	roots.AddCert(parseCert(t, mustSecret(t, cl, "orders-tls-ca").Data["ca.crt"]))
 	cert := parseCert(t, mustSecret(t, cl, "orders-tiproxy-cluster-secret").Data["tls.crt"])
-	if _, err := cert.Verify(x509.VerifyOptions{Roots: roots, DNSName: ptr.Deref(ep.TLSConfig.ServerName, "")}); err != nil {
+	if _, err := cert.Verify(x509.VerifyOptions{Roots: roots, DNSName: ep.TLS.ServerName}); err != nil {
 		t.Errorf("tiproxy cluster certificate does not verify for the scrape's server name: %v", err)
 	}
 }

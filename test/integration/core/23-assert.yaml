@@ -1,227 +1,57 @@
-# The provider creates a PodMonitor and a VMPodScrape, owned by the Instance and labelled so
-# that plugin-metrics finds them and the monitoring systems select them. Each
-# endpoint keeps only its component's pods and, with mTLS between components,
-# scrapes over https with the cluster client certificate.
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
+# Every component serves its metrics natively, so the provider publishes the
+# endpoints of each ready component without any monitoring destination. With
+# mTLS between components they are https and name the cluster client
+# certificate the scraper presents, and the server name each component's
+# certificate carries.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
 metadata:
-  name: test-instance-metrics
-  labels:
-    app.kubernetes.io/managed-by: everest
-    app.kubernetes.io/instance: test-instance
-    core.openeverest.io/provider: tidb
-    release: kube-prometheus-stack
-  ownerReferences:
-    - apiVersion: core.openeverest.io/v1alpha1
-      kind: Instance
-      name: test-instance
-spec:
-  selector:
-    matchLabels:
-      core.openeverest.io/instance: test-instance
-      core.openeverest.io/provider: tidb
-  podTargetLabels:
-    - core.openeverest.io/component
-  podMetricsEndpoints:
-    - port: client
-      path: /metrics
-      interval: 30s
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-pd
-      relabelings:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: pd
-    - port: status
-      path: /metrics
-      interval: 30s
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-tikv
-      relabelings:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: tikv
-    - port: status
-      path: /metrics
-      interval: 30s
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-tidb
-      relabelings:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: tidb
-    - port: metrics
-      path: /metrics
-      interval: 30s
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-tiflash
-      relabelings:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: tiflash
-    - port: proxy-metrics
-      path: /metrics
-      interval: 30s
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-tiflash
-      relabelings:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: tiflash
-    - port: api
-      path: /api/metrics
-      interval: 30s
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-tiproxy
-      relabelings:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: tiproxy
----
-apiVersion: operator.victoriametrics.com/v1beta1
-kind: VMPodScrape
-metadata:
-  name: test-instance-vm-metrics
-  labels:
-    app.kubernetes.io/managed-by: everest
-    app.kubernetes.io/instance: test-instance
-    core.openeverest.io/provider: tidb
-    team: db
-  ownerReferences:
-    - apiVersion: core.openeverest.io/v1alpha1
-      kind: Instance
-      name: test-instance
-spec:
-  selector:
-    matchLabels:
-      core.openeverest.io/instance: test-instance
-      core.openeverest.io/provider: tidb
-  podTargetLabels:
-    - core.openeverest.io/component
-  podMetricsEndpoints:
-    - port: client
-      path: /metrics
-      interval: 1m
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-pd
-      relabelConfigs:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: pd
-    - port: status
-      path: /metrics
-      interval: 1m
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-tikv
-      relabelConfigs:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: tikv
-    - port: status
-      path: /metrics
-      interval: 1m
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-tidb
-      relabelConfigs:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: tidb
-    - port: metrics
-      path: /metrics
-      interval: 1m
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-tiflash
-      relabelConfigs:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: tiflash
-    - port: proxy-metrics
-      path: /metrics
-      interval: 1m
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-tiflash
-      relabelConfigs:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: tiflash
-    - port: api
-      path: /api/metrics
-      interval: 1m
-      scheme: https
-      tlsConfig:
-        ca:
-          secret: {name: test-instance-cluster-client-secret, key: ca.crt}
-        cert:
-          secret: {name: test-instance-cluster-client-secret, key: tls.crt}
-        keySecret: {name: test-instance-cluster-client-secret, key: tls.key}
-        serverName: test-instance-tiproxy
-      relabelConfigs:
-        - action: keep
-          sourceLabels: [__meta_kubernetes_pod_label_core_openeverest_io_component]
-          regex: tiproxy
+  name: test-instance
+status:
+  monitoring:
+    sources:
+      identity:
+        labels:
+          openeverest_instance: test-instance
+          openeverest_namespace: ($namespace)
+          openeverest_provider: tidb
+      metrics:
+        - component: pd
+          kind: tidb.pd
+          podSelector:
+            core.openeverest.io/instance: test-instance
+            core.openeverest.io/component: pd
+          port: client
+          path: /metrics
+          scheme: https
+          tls:
+            ca:
+              secretKeyRef: {name: test-instance-cluster-client-secret, key: ca.crt}
+            serverName: test-instance-pd
+            clientCertificateSecretRef: {name: test-instance-cluster-client-secret}
+        - component: tikv
+          kind: tikv
+          podSelector:
+            core.openeverest.io/instance: test-instance
+            core.openeverest.io/component: tikv
+          port: status
+          path: /metrics
+          scheme: https
+          tls:
+            ca:
+              secretKeyRef: {name: test-instance-cluster-client-secret, key: ca.crt}
+            serverName: test-instance-tikv
+            clientCertificateSecretRef: {name: test-instance-cluster-client-secret}
+        - component: tidb
+          kind: tidb
+          podSelector:
+            core.openeverest.io/instance: test-instance
+            core.openeverest.io/component: tidb
+          port: status
+          path: /metrics
+          scheme: https
+          tls:
+            ca:
+              secretKeyRef: {name: test-instance-cluster-client-secret, key: ca.crt}
+            serverName: test-instance-tidb
+            clientCertificateSecretRef: {name: test-instance-cluster-client-secret}

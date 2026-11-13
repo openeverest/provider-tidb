@@ -146,9 +146,10 @@ Ordered by value/effort; each phase is independently shippable.
 - **External access:** map `component.service` → v2 `server`/expose for LoadBalancer/NodePort.
 
 ### Phase 4 — Observability & security
-- **Monitoring:** Prometheus Operator `PodMonitor` or VictoriaMetrics `VMPodScrape` for every
-  component; the Metrics plugin's TiDB dashboard reads the Prometheus one (done). Referencing a `MonitoringConfig` waits on the Instance API
-  offering a field for it.
+- **Monitoring:** the monitoring contract (`definition/monitoring.yaml`): native metrics endpoints
+  of every component published in `status.monitoring.sources`, with the cluster client
+  certificate under mTLS, and scraped by the extension of each `MonitoringDestination` in
+  `spec.monitoring.destinations` (done).
 - **TLS:** cluster-internal mTLS (`Cluster.spec.tlsCluster`) and client TLS for TiDB (MySQL),
   with provider-issued certificates (or cert-manager, optionally with your own issuer), on by
   default in the UI (done). Next: certificate rotation.
