@@ -150,10 +150,10 @@ crds:
   # -- Job backoff limit for the install hook.
   backoffLimit: 3
 
-# -- Instance presets offered when creating a TiDB Instance.
+# -- Cluster instance presets offered when creating a TiDB Instance.
 # Each preset must have 'name', 'enabled', and 'spec' fields; 'spec' is the full
-# InstancePresetSpec and is copied verbatim into the new Instance. Rendered as
-# InstancePreset '<shortName>-<name>'. Presets pin the default version bundle so
+# ProviderInstancePresetSpec and is copied verbatim into the new Instance. Rendered as
+# ProviderInstancePreset '<shortName>-<name>'. Presets pin the default version bundle so
 # the new Instance shows its version (presets_test.go keeps them in sync). CPU
 # stays in whole cores: the API serves fractions as millicores ("500m"), which
 # the UI's numeric field can't read.
