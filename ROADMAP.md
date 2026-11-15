@@ -10,7 +10,7 @@ source of truth for scope; update it as milestones land.
 ## 1. Context & design constraints
 
 - **Operator:** TiDB Operator **v2** (`main` line, tag `v2.0.1`). This is a control-plane redesign,
-  not a new database — it manages standard TiDB releases (examples use TiDB LTS `v8.5.2`).
+  not a new database — it manages standard TiDB releases (examples use TiDB LTS `v8.5.8`).
 - **API module to import:** `github.com/pingcap/tidb-operator/api/v2` (a standalone, lightweight Go
   module — the provider depends on the CRD types only, not the whole operator).
 - **Two API groups the provider touches:**

@@ -5,7 +5,7 @@ metadata:
   name: clone
 spec:
   providerRef: {name: tidb}
-  version: "8.5.2"
+  version: "8.5.8"
   topology: {type: cluster}
   components:
     pd: {type: pd, replicas: 1, storage: {size: 10Gi}}

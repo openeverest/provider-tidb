@@ -21,7 +21,7 @@ spec:
   replicas: 1
   template:
     spec:
-      version: v7.5.5
+      version: v7.5.8
       overlay:
         pod:
           metadata:
@@ -43,7 +43,7 @@ spec:
   replicas: 1
   template:
     spec:
-      version: v7.5.5
+      version: v7.5.8
       overlay:
         pod:
           metadata:
@@ -65,7 +65,7 @@ spec:
   replicas: 1
   template:
     spec:
-      version: v7.5.5
+      version: v7.5.8
       security:
         tls:
           mysql:

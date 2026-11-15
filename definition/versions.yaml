@@ -6,36 +6,67 @@
 # The top-level `versions:` bundles are what a user selects via
 # Instance.spec.version; the runtime resolves a bundle into per-component
 # versions before Sync runs.
+#
+# Policy:
+# - Bundles track TiDB LTS lines at their latest patch; the default is the
+#   newest LTS.
+# - Superseded versions stay listed with `deprecated: true`, so existing
+#   instances keep resolving and get a ComponentVersionDeprecated condition.
+#   Never delete a version or bundle an instance may still use.
 
 componentTypes:
     pd:
-        defaultVersion: v8.5.2
+        defaultVersion: v8.5.8
         versions:
+            - version: v8.5.8
+              image: pingcap/pd:v8.5.8
+            - version: v7.5.8
+              image: pingcap/pd:v7.5.8
             - version: v8.5.2
               image: pingcap/pd:v8.5.2
+              deprecated: true
             - version: v7.5.5
               image: pingcap/pd:v7.5.5
+              deprecated: true
     tikv:
-        defaultVersion: v8.5.2
+        defaultVersion: v8.5.8
         versions:
+            - version: v8.5.8
+              image: pingcap/tikv:v8.5.8
+            - version: v7.5.8
+              image: pingcap/tikv:v7.5.8
             - version: v8.5.2
               image: pingcap/tikv:v8.5.2
+              deprecated: true
             - version: v7.5.5
               image: pingcap/tikv:v7.5.5
+              deprecated: true
     tidb:
-        defaultVersion: v8.5.2
+        defaultVersion: v8.5.8
         versions:
+            - version: v8.5.8
+              image: pingcap/tidb:v8.5.8
+            - version: v7.5.8
+              image: pingcap/tidb:v7.5.8
             - version: v8.5.2
               image: pingcap/tidb:v8.5.2
+              deprecated: true
             - version: v7.5.5
               image: pingcap/tidb:v7.5.5
+              deprecated: true
     tiflash:
-        defaultVersion: v8.5.2
+        defaultVersion: v8.5.8
         versions:
+            - version: v8.5.8
+              image: pingcap/tiflash:v8.5.8
+            - version: v7.5.8
+              image: pingcap/tiflash:v7.5.8
             - version: v8.5.2
               image: pingcap/tiflash:v8.5.2
+              deprecated: true
             - version: v7.5.5
               image: pingcap/tiflash:v7.5.5
+              deprecated: true
     tiproxy:
         defaultVersion: v1.3.3
         versions:
@@ -44,8 +75,23 @@ componentTypes:
             - version: v1.3.2
               image: pingcap/tiproxy:v1.3.2
 
-defaultVersion: "8.5.2"
+defaultVersion: "8.5.8"
 versions:
+    - name: "8.5.8"
+      components:
+          pd: v8.5.8
+          tikv: v8.5.8
+          tidb: v8.5.8
+          tiflash: v8.5.8
+          tiproxy: v1.3.3
+    - name: "7.5.8"
+      components:
+          pd: v7.5.8
+          tikv: v7.5.8
+          tidb: v7.5.8
+          tiflash: v7.5.8
+          tiproxy: v1.3.3
+    # Superseded: kept for existing instances.
     - name: "8.5.2"
       components:
           pd: v8.5.2

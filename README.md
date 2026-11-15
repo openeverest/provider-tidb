@@ -234,7 +234,7 @@ metadata:
 spec:
   providerRef:
     name: tidb
-  version: "8.5.2"
+  version: "8.5.8"
   topology:
     type: cluster
   components:
@@ -588,12 +588,19 @@ and run `ALTER INSTANCE RELOAD TLS` on each TiDB to pick up the new certificates
 
 | Version bundle | Default | Components |
 |---|---|---|
-| `8.5.2` | ✅ | PD / TiKV / TiDB / TiFlash `v8.5.2`, TiProxy `v1.3.3` |
-| `7.5.5` |  | PD / TiKV / TiDB / TiFlash `v7.5.5`, TiProxy `v1.3.3` |
+| `8.5.8` | ✅ | PD / TiKV / TiDB / TiFlash `v8.5.8`, TiProxy `v1.3.3` |
+| `7.5.8` |  | PD / TiKV / TiDB / TiFlash `v7.5.8`, TiProxy `v1.3.3` |
+| `8.5.2` *(deprecated)* |  | PD / TiKV / TiDB / TiFlash `v8.5.2`, TiProxy `v1.3.3` |
+| `7.5.5` *(deprecated)* |  | PD / TiKV / TiDB / TiFlash `v7.5.5`, TiProxy `v1.3.3` |
 
 Source of truth: [definition/versions.yaml](definition/versions.yaml). Each bundle pins the TiDB
 components to the same TiDB release, and TiProxy to a release of its own version line (`v1.3.3`
 or `v1.3.2` via `spec.components.tiproxy.version`); the user selects one via `Instance.spec.version`.
+
+Bundles track the TiDB LTS lines at their latest patch. Superseded bundles stay so existing
+Instances keep working, but are deprecated: such Instances get a `ComponentVersionDeprecated`
+condition. Move them to the newer bundle of their line (e.g. `8.5.2` → `8.5.8`), a rolling
+upgrade.
 
 ## Configuration
 

@@ -48,7 +48,7 @@ spec:
               set -e
               for g in pdgroup tikvgroup tidbgroup; do
                 kubectl -n $NAMESPACE patch $g/test-instance --subresource status --type merge \
-                  -p '{"status":{"version":"v7.5.5","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=test-instance"}}'
+                  -p '{"status":{"version":"v7.5.8","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=test-instance"}}'
               done
         - assert:
             file: 11-assert.yaml
@@ -136,7 +136,7 @@ spec:
               set -e
               for g in pdgroup tikvgroup tidbgroup; do
                 kubectl -n $NAMESPACE patch $g/test-instance --subresource status --type merge \
-                  -p '{"status":{"version":"v8.5.2"}}'
+                  -p '{"status":{"version":"v8.5.8"}}'
               done
         - assert:
             file: 11-assert.yaml
@@ -219,7 +219,7 @@ spec:
         - script:
             content: |
               kubectl -n $NAMESPACE patch tiflashgroup/test-instance --subresource status --type merge \
-                -p '{"status":{"version":"v8.5.2","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=test-instance"}}'
+                -p '{"status":{"version":"v8.5.8","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=test-instance"}}'
         - assert:
             file: 11-assert.yaml
 

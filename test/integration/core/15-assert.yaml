@@ -14,7 +14,7 @@ spec:
   replicas: 1
   template:
     spec:
-      version: v8.5.2
+      version: v8.5.8
       overlay:
         pod:
           metadata:
