@@ -21,6 +21,9 @@ VM_OPERATOR_VERSION ?= v0.66.1
 # cert-manager version whose CRDs the provider targets for tls.certManager.
 CERT_MANAGER_VERSION ?= v1.20.2
 
+# Released provider chart the upgrade suite starts from; empty means the latest release.
+PROVIDER_RELEASED_VERSION ?=
+
 # Image URL to use for building/pushing image targets
 IMG ?= ghcr.io/openeverest/provider-tidb-dev:latest
 
@@ -182,6 +185,10 @@ test-integration-e2e: ## Run end-to-end tests against the real TiDB Operator (se
 test-integration-pitr: ## Run point-in-time recovery tests against the real TiDB Operator (see deploy-provider-e2e).
 	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/pitr
 
+.PHONY: test-integration-upgrade
+test-integration-upgrade: ## Run the upgrade-from-release tests (see deploy-provider-released); upgrades the provider to IMG.
+	. ./test/vars.sh && chainsaw test --config ./test/integration/.chainsaw.yaml ./test/integration/upgrade
+
 .PHONY: load-image
 load-image: ## Import the provider image (IMG) into the k3d cluster.
 	k3d image import ${IMG} -c ${K3D_CLUSTER_NAME}
@@ -245,6 +252,14 @@ deploy-provider-e2e: helm-deps ## Deploy the provider with the bundled TiDB Oper
 		--set image.repository=$(_IMG_REPO) \
 		--set image.tag=$(_IMG_TAG) \
 		--set image.pullPolicy=Never \
+		--wait --timeout 10m
+
+.PHONY: deploy-provider-released
+deploy-provider-released: ## Deploy the released provider chart (PROVIDER_RELEASED_VERSION, default latest) with the bundled TiDB Operator.
+	helm upgrade --install provider-tidb oci://ghcr.io/openeverest/charts/provider-tidb \
+		$(if $(PROVIDER_RELEASED_VERSION),--version $(PROVIDER_RELEASED_VERSION)) \
+		--create-namespace \
+		--namespace provider-system \
 		--wait --timeout 10m
 
 ##@ Local Development Cluster

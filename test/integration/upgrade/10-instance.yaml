@@ -1,0 +1,35 @@
+# Instance created by the released provider on its default version bundle; the
+# create-instance step fills in __VERSION__ from the released Provider. Same
+# single-TiKV sizing as the e2e suite.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  providerRef:
+    name: tidb
+  version: "__VERSION__"
+  topology:
+    type: cluster
+    parameters:
+      tls:
+        cluster: true
+        client: true
+  components:
+    pd:
+      type: pd
+      replicas: 1
+      storage:
+        size: 10Gi
+      parameters:
+        config: |
+          [replication]
+          max-replicas = 1
+    tikv:
+      type: tikv
+      replicas: 1
+      storage:
+        size: 20Gi
+    tidb:
+      type: tidb
+      replicas: 1
