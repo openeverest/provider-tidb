@@ -150,6 +150,16 @@ jobs:
       deploy_target: deploy-provider-e2e
     secrets: inherit
 
+  test-integration-upgrade:
+    name: Integration / upgrade
+    needs: [lint, build, verify]
+    uses: ./.github/workflows/integration-test.yaml
+    with:
+      make_target: test-integration-upgrade
+      suite: upgrade
+      deploy_target: deploy-provider-released
+    secrets: inherit
+
   test-integration-pitr:
     name: Integration / pitr
     needs: [lint, build, verify]

@@ -75,6 +75,22 @@ make deploy-provider-e2e
 make test-integration-e2e
 ```
 
+The `upgrade/` suite checks the upgrade path from the latest released provider
+to this build. It starts from the released chart and image from ghcr (pin one
+with `PROVIDER_RELEASED_VERSION`) and creates an Instance on the released
+default version, then writes rows to it. It then runs `deploy-provider-e2e`
+itself, the same `helm upgrade` users run. It fails if any TiDB pod is replaced
+or restarted, or if the Cluster or a group changes generation (a spec rewrite
+the operator would roll out). It also fails if the rows change. When this
+build's default version is newer, the suite then upgrades the Instance to it.
+A change that intentionally restarts existing Instances on upgrade fails this
+suite by design; call it out in the PR and release notes.
+
+```bash
+make deploy-provider-released   # IMG must already be imported into k3d
+make test-integration-upgrade
+```
+
 ## Running in CI
 
 `.github/workflows/ci.yaml` runs each suite as a separate job through the

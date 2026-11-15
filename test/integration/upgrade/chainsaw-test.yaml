@@ -1,0 +1,217 @@
+---
+# Upgrade suite: an Instance created by the latest released provider must
+# survive `helm upgrade` to this build untouched, then move to the new default
+# version. Requires the released provider deployed WITH the bundled TiDB
+# Operator (see the deploy-provider-released Make target); the upgrade step runs
+# deploy-provider-e2e itself.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: upgrade
+spec:
+  description: |
+    With the released provider, create an Instance on its default version and
+    write rows. Upgrade the provider to this build and require that no TiDB pod
+    is replaced or restarted, no Cluster or group spec changes, the Instance
+    stays Ready and the rows are intact. Then, if this build's default version
+    differs, upgrade the Instance to it and check the rows again.
+
+  # Image pulls, cluster bootstrap and a rolling version upgrade take minutes.
+  timeouts:
+    assert: 10m
+    error: 5m
+    delete: 5m
+    cleanup: 5m
+
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,pd,tikv,tidb -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get configmap upgrade-baseline -o yaml
+    - script:
+        content: kubectl -n $NAMESPACE get pods,pvc,events -o wide
+    - script:
+        content: |
+          for p in $(kubectl -n $NAMESPACE get pods -l pingcap.com/cluster=test-instance -o name); do
+            echo "===== $p (previous)"; kubectl -n $NAMESPACE logs $p --previous --tail=200 || true
+            echo "===== $p (current)"; kubectl -n $NAMESPACE logs $p --tail=100 || true
+          done
+    - script:
+        content: helm -n provider-system history provider-tidb
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/name=provider-tidb
+        tail: 200
+    - podLogs:
+        namespace: provider-system
+        selector: app.kubernetes.io/component=tidb-operator
+        tail: 100
+
+  steps:
+    - name: released-provider-deployed
+      try:
+        - assert:
+            file: ../e2e/00-assert.yaml
+        # The provider still runs the released image, not this build's.
+        - script:
+            content: |
+              set -e
+              image=$(kubectl -n provider-system get deployment provider-tidb -o jsonpath='{.spec.template.spec.containers[0].image}')
+              echo "provider image: $image"
+              case "$image" in ghcr.io/openeverest/provider-tidb:*) ;; *) exit 1 ;; esac
+
+    - name: create-instance
+      try:
+        - script:
+            content: |
+              set -e
+              v=$(kubectl get providers.core.openeverest.io tidb -o jsonpath='{.spec.defaultVersion}')
+              echo "released default version: $v"
+              [ -n "$v" ]
+              sed "s/__VERSION__/$v/" 10-instance.yaml | kubectl -n $NAMESPACE apply -f -
+
+    - name: cluster-ready
+      try:
+        - assert:
+            file: ../e2e/20-assert.yaml
+        - assert:
+            file: ../core/11-assert.yaml
+
+    - name: write-rows
+      try:
+        - apply:
+            file: ../e2e/50-sql-shell.yaml
+        - assert:
+            file: ../e2e/50-assert.yaml
+        - script:
+            timeout: 2m
+            content: |
+              set -e
+              sql() { echo "$1" | kubectl -n $NAMESPACE exec -i sql-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s'; }
+              sql "CREATE DATABASE upgrade; CREATE TABLE upgrade.rows (id INT PRIMARY KEY, v VARCHAR(64));"
+              sql "INSERT INTO upgrade.rows WITH RECURSIVE s(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM s WHERE n < 1000) SELECT n, MD5(n) FROM s;"
+
+    # Record which pods run (UID and restart counts) and the generation of every
+    # TiDB Operator object the provider writes, to compare after the upgrade.
+    - name: record-baseline
+      try:
+        - script:
+            content: |
+              set -e
+              pods=$(kubectl -n $NAMESPACE get pods -l pingcap.com/cluster=test-instance \
+                -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.uid} restarts={range .status.containerStatuses[*]}{.restartCount},{end}{"\n"}{end}' | sort)
+              objs=$(kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup \
+                -o jsonpath='{range .items[*]}{.kind}/{.metadata.name} generation={.metadata.generation}{"\n"}{end}' | sort)
+              printf '%s\n%s\n' "$pods" "$objs"
+              [ "$(echo "$pods" | wc -l)" = "3" ]
+              kubectl -n $NAMESPACE create configmap upgrade-baseline \
+                --from-literal=released-version="$(kubectl get providers.core.openeverest.io tidb -o jsonpath='{.spec.defaultVersion}')" \
+                --from-literal=released-image="$(kubectl -n provider-system get deployment provider-tidb -o jsonpath='{.spec.template.spec.containers[0].image}')" \
+                --from-literal=pods="$pods" --from-literal=objects="$objs"
+
+    - name: upgrade-provider
+      try:
+        - script:
+            timeout: 12m
+            content: make -C "$PROVIDER_ROOT_PATH" deploy-provider-e2e
+        - assert:
+            file: ../e2e/00-assert.yaml
+        - script:
+            content: |
+              set -e
+              released=$(kubectl -n $NAMESPACE get configmap upgrade-baseline -o jsonpath='{.data.released-image}')
+              image=$(kubectl -n provider-system get deployment provider-tidb -o jsonpath='{.spec.template.spec.containers[0].image}')
+              echo "provider image: $released -> $image"
+              [ "$image" != "$released" ]
+
+    - name: instance-untouched
+      try:
+        # Give the new provider time to reconcile the Instance; any change it
+        # makes to the TiDB objects shows up within this window.
+        - sleep:
+            duration: 90s
+        - assert:
+            file: ../core/11-assert.yaml
+        - script:
+            content: |
+              set -e
+              pods=$(kubectl -n $NAMESPACE get pods -l pingcap.com/cluster=test-instance \
+                -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.uid} restarts={range .status.containerStatuses[*]}{.restartCount},{end}{"\n"}{end}' | sort)
+              objs=$(kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup \
+                -o jsonpath='{range .items[*]}{.kind}/{.metadata.name} generation={.metadata.generation}{"\n"}{end}' | sort)
+              printf '%s\n' "$(kubectl -n $NAMESPACE get configmap upgrade-baseline -o jsonpath='{.data.pods}')" > /tmp/upgrade-pods-before
+              printf '%s\n' "$(kubectl -n $NAMESPACE get configmap upgrade-baseline -o jsonpath='{.data.objects}')" > /tmp/upgrade-objects-before
+              printf '%s\n' "$pods" > /tmp/upgrade-pods-after
+              printf '%s\n' "$objs" > /tmp/upgrade-objects-after
+              # A changed UID or restart count means a pod was replaced or
+              # restarted; a changed generation means the provider rewrote a
+              # spec, which the operator rolls out as a restart.
+              diff -u /tmp/upgrade-pods-before /tmp/upgrade-pods-after
+              diff -u /tmp/upgrade-objects-before /tmp/upgrade-objects-after
+        - script:
+            content: |
+              set -e
+              sql() { echo "$1" | kubectl -n $NAMESPACE exec -i sql-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s'; }
+              rows=$(sql "SELECT COUNT(*), SUM(id) FROM upgrade.rows;")
+              echo "rows: $rows"
+              [ "$rows" = "$(printf '1000\t500500')" ]
+
+    - name: upgrade-instance-version
+      try:
+        - script:
+            timeout: 15m
+            content: |
+              set -e
+              old=$(kubectl -n $NAMESPACE get configmap upgrade-baseline -o jsonpath='{.data.released-version}')
+              new=$(kubectl get providers.core.openeverest.io tidb -o jsonpath='{.spec.defaultVersion}')
+              echo "released default: $old, this build's default: $new"
+              if [ "$old" = "$new" ]; then
+                echo "default version unchanged, nothing to upgrade"
+                exit 0
+              fi
+              image_tag=$(kubectl get providers.core.openeverest.io tidb -o jsonpath="{.spec.versions[?(@.name==\"$new\")].components.tidb}")
+              [ -n "$image_tag" ]
+              kubectl -n $NAMESPACE patch instances.core.openeverest.io test-instance --type merge -p "{\"spec\":{\"version\":\"$new\"}}"
+              # Done once PD, TiKV and TiDB all run Ready on the new images and
+              # the Instance is Ready again.
+              for i in $(seq 1 160); do
+                pods=$(kubectl -n $NAMESPACE get pods -l pingcap.com/cluster=test-instance \
+                  -o jsonpath='{range .items[*]}{.spec.containers[0].image} {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}')
+                phase=$(kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o jsonpath='{.status.phase}')
+                upgraded=$(echo "$pods" | grep -c ":$image_tag True$" || true)
+                echo "phase=$phase upgraded-ready-pods=$upgraded/$(echo "$pods" | grep -c . || true)"
+                if [ "$phase" = "Ready" ] && [ "$upgraded" = "3" ] && [ "$(echo "$pods" | grep -c .)" = "3" ]; then
+                  exit 0
+                fi
+                sleep 5
+              done
+              exit 1
+        - assert:
+            file: ../core/11-assert.yaml
+        - script:
+            content: |
+              set -e
+              sql() { echo "$1" | kubectl -n $NAMESPACE exec -i sql-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -N -s'; }
+              sql "SELECT tidb_version();" | head -2
+              rows=$(sql "SELECT COUNT(*), SUM(id) FROM upgrade.rows;")
+              echo "rows: $rows"
+              [ "$rows" = "$(printf '1000\t500500')" ]
+              sql "ADMIN CHECK TABLE upgrade.rows;"
+
+    - name: delete-instance
+      try:
+        - delete:
+            ref:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              name: test-instance
+        - wait:
+            apiVersion: core.openeverest.io/v1alpha1
+            kind: Instance
+            name: test-instance
+            for:
+              deletion: {}
+        - error:
+            file: ../e2e/40-error.yaml

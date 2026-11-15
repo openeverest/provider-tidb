@@ -28,7 +28,7 @@ on:
         type: string
         required: true
       deploy_target:
-        description: 'Make target that deploys the provider (deploy-provider-e2e also installs the real TiDB Operator)'
+        description: 'Make target that deploys the provider (deploy-provider-e2e also installs the real TiDB Operator; deploy-provider-released installs the latest release with it)'
         type: string
         default: deploy-provider-ci
 
