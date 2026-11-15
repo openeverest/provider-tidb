@@ -297,7 +297,7 @@ func TestValidateTiDBMonitoring(t *testing.T) {
 				WithRESTMapper(testrestmapper.TestOnlyStaticRESTMapper(mapperScheme)).
 				WithObjects(testProvider()).Build()
 			c := controller.NewContext(context.Background(), cl, monitoredInstance(t, tt.params), common.ProviderName)
-			assertError(t, ValidateTiDB(c), tt.wantErr)
+			assertError(t, validateAll(c), tt.wantErr)
 		})
 	}
 }

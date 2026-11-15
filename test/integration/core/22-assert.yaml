@@ -1,11 +1,14 @@
-# Validate rejects the scale-in, so the Instance fails and the group keeps its
-# three nodes instead of starting a removal PD would refuse.
+# The scale-in is checked against the live TiKVGroup, so admission only warns
+# and the reconciler blocks it: the group keeps its three nodes instead of
+# starting a removal PD would refuse.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
   name: test-instance
 status:
-  phase: Failed
+  (conditions[?type == 'Ready']):
+    - status: "False"
+      reason: InvalidReference
 ---
 apiVersion: core.pingcap.com/v1alpha1
 kind: TiKVGroup

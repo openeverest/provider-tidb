@@ -260,7 +260,7 @@ func TestValidateTiDBTLSImmutable(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c, _ := tlsContext(t, tt.params, append([]client.Object{testProvider()}, tt.objs...)...)
-			assertError(t, ValidateTiDB(c), tt.wantErr)
+			assertError(t, validateAll(c), tt.wantErr)
 		})
 	}
 }

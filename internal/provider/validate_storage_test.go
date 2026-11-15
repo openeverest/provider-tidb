@@ -62,7 +62,7 @@ func TestValidateTiDBStorageChanges(t *testing.T) {
 			if tt.existing {
 				objs = append(objs, groupsWithStorage("10Gi", "20Gi")...)
 			}
-			assertError(t, ValidateTiDB(validationContext(t, in, objs...)), tt.wantErr)
+			assertError(t, validateAll(validationContext(t, in, objs...)), tt.wantErr)
 		})
 	}
 }

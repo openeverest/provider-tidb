@@ -152,9 +152,35 @@ func victoriaMetricsSettings(m *cluster.Monitoring) *scrapeSettings {
 	return &scrapeSettings{interval: m.VictoriaMetrics.Interval, labels: m.VictoriaMetrics.PodScrapeLabels}
 }
 
-// validateMonitoring checks the settings of every enabled monitoring system and
-// that its operator's CRD is installed.
+// validateMonitoring checks the settings of every enabled monitoring system.
 func validateMonitoring(c *controller.Context) error {
+	return forEachScraper(c, func(s scraper, settings scrapeSettings, labelsField string) error {
+		if settings.interval != "" {
+			if _, err := model.ParseDuration(settings.interval); err != nil {
+				return fmt.Errorf("%s.interval %q is not a valid duration such as 30s or 1m", s.field, settings.interval)
+			}
+		}
+		return validateLabels(s.field+"."+labelsField, settings.labels)
+	})
+}
+
+// validateScraperCRDs checks that the operator each requested scraper needs
+// is installed.
+func validateScraperCRDs(c *controller.Context) error {
+	return forEachScraper(c, func(s scraper, _ scrapeSettings, _ string) error {
+		if _, err := c.Client().RESTMapper().RESTMapping(s.kind.GroupKind(), s.kind.Version); err != nil {
+			if meta.IsNoMatchError(err) {
+				return fmt.Errorf("%s requires %s: the %s CRD (%s) is not installed",
+					s.field, s.operator, s.kind.Kind, s.kind.GroupVersion())
+			}
+			return fmt.Errorf("look up the %s CRD: %w", s.kind.Kind, err)
+		}
+		return nil
+	})
+}
+
+// forEachScraper runs check on each scraper the topology parameters turn on.
+func forEachScraper(c *controller.Context, check func(s scraper, settings scrapeSettings, labelsField string) error) error {
 	if topology := c.Instance().Spec.Topology; topology == nil || topology.Parameters == nil || topology.Parameters.Raw == nil {
 		return nil
 	}
@@ -163,33 +189,14 @@ func validateMonitoring(c *controller.Context) error {
 		return fmt.Errorf("invalid topology parameters: %w", err)
 	}
 	if settings := prometheusSettings(params.Monitoring); settings != nil {
-		if err := validateScraper(c, prometheusScraper, *settings, "podMonitorLabels"); err != nil {
+		if err := check(prometheusScraper, *settings, "podMonitorLabels"); err != nil {
 			return err
 		}
 	}
 	if settings := victoriaMetricsSettings(params.Monitoring); settings != nil {
-		if err := validateScraper(c, victoriaMetricsScraper, *settings, "podScrapeLabels"); err != nil {
+		if err := check(victoriaMetricsScraper, *settings, "podScrapeLabels"); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func validateScraper(c *controller.Context, s scraper, settings scrapeSettings, labelsField string) error {
-	if settings.interval != "" {
-		if _, err := model.ParseDuration(settings.interval); err != nil {
-			return fmt.Errorf("%s.interval %q is not a valid duration such as 30s or 1m", s.field, settings.interval)
-		}
-	}
-	if err := validateLabels(s.field+"."+labelsField, settings.labels); err != nil {
-		return err
-	}
-	if _, err := c.Client().RESTMapper().RESTMapping(s.kind.GroupKind(), s.kind.Version); err != nil {
-		if meta.IsNoMatchError(err) {
-			return fmt.Errorf("%s requires %s: the %s CRD (%s) is not installed",
-				s.field, s.operator, s.kind.Kind, s.kind.GroupVersion())
-		}
-		return fmt.Errorf("look up the %s CRD: %w", s.kind.Kind, err)
 	}
 	return nil
 }

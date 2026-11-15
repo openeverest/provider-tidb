@@ -115,7 +115,7 @@ func TestValidateTiDBTiFlashVersion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := validationContext(t, withTiFlash(testInstance("8.5.2"), tt.replicas, tt.version), testProvider())
-			assertError(t, ValidateTiDB(c), tt.wantErr)
+			assertError(t, validateAll(c), tt.wantErr)
 		})
 	}
 }

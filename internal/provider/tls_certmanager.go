@@ -81,9 +81,9 @@ func caIssuerName(instance string) string {
 	return instance + "-tls-ca"
 }
 
-// validateCertManager checks the cert-manager settings: they need TLS, an
-// issuer kind cert-manager knows, and cert-manager's CRDs.
-func validateCertManager(c *controller.Context, settings cluster.TLS) error {
+// validateCertManager checks the cert-manager settings: they need TLS and an
+// issuer kind cert-manager knows.
+func validateCertManager(settings cluster.TLS) error {
 	if !usesCertManager(settings) {
 		return nil
 	}
@@ -94,6 +94,15 @@ func validateCertManager(c *controller.Context, settings cluster.TLS) error {
 		if kind := issuerKind(ref); kind != issuerKindIssuer && kind != issuerKindClusterIssuer {
 			return fmt.Errorf("tls.certManager.issuerRef.kind %q must be %s or %s", ref.Kind, issuerKindIssuer, issuerKindClusterIssuer)
 		}
+	}
+	return nil
+}
+
+// validateCertManagerCRD checks that cert-manager is installed when
+// tls.certManager asks for it.
+func validateCertManagerCRD(c *controller.Context, settings cluster.TLS) error {
+	if !usesCertManager(settings) {
+		return nil
 	}
 	gvk := cmapi.SchemeGroupVersion.WithKind(cmapi.CertificateKind)
 	if _, err := c.Client().RESTMapper().RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {

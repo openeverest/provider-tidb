@@ -252,7 +252,7 @@ func TestValidateTiDBTiProxyVersion(t *testing.T) {
 				objs = append(objs, tt.existing)
 			}
 			c := validationContext(t, withTiProxy(testInstance("8.5.2"), tt.replicas, tt.version), objs...)
-			assertError(t, ValidateTiDB(c), tt.wantErr)
+			assertError(t, validateAll(c), tt.wantErr)
 		})
 	}
 }

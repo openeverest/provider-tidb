@@ -16,9 +16,11 @@ import (
 func main() {
 	var serverPort int
 	var metricsBindAddress string
+	var admission bool
 
 	flag.IntVar(&serverPort, "server-port", 8082, "The port for the provider HTTP server.")
 	flag.StringVar(&metricsBindAddress, "metrics-bind-address", ":8081", "The address the metrics endpoint binds to. Use 0 to disable.")
+	flag.BoolVar(&admission, "admission", true, "Serve the Instance admission webhook, with the serving certificate the chart mounts.")
 	flag.Parse()
 
 	l := ctrl.Log.WithName("setup")
@@ -27,11 +29,11 @@ func main() {
 	p := provider.New()
 
 	opts := []reconciler.ReconcilerOption{
-		// Enable HTTP server for validation endpoint
-		reconciler.WithServer(reconciler.ServerConfig{
-			Port:           serverPort,
-			ValidationPath: "/validate",
-		}),
+		// Serve the health and readiness probes.
+		reconciler.WithServer(reconciler.ServerConfig{Port: serverPort}),
+	}
+	if admission {
+		opts = append(opts, reconciler.WithAdmission())
 	}
 
 	if metricsBindAddress != "0" {

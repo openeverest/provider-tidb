@@ -121,11 +121,6 @@ func instanceForGroup(_ context.Context, obj client.Object) []reconcile.Request 
 	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}}}
 }
 
-// Validate checks that the Instance spec is valid for TiDB.
-func (p *Provider) Validate(c *controller.Context) error {
-	return ValidateTiDB(c)
-}
-
 // Sync reconciles the Instance into the TiDB Operator v2 resources.
 func (p *Provider) Sync(c *controller.Context) error {
 	return SyncTiDB(c)
