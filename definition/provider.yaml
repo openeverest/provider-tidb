@@ -19,3 +19,6 @@ components:
         type: tiproxy
         parametersSchema: TiproxyParameters
 name: tidb
+# Instances can be suspended: TiDB Operator's suspendCompute deletes every pod
+# and keeps the volumes.
+suspend: {}

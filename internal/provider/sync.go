@@ -76,6 +76,7 @@ func SyncTiDB(c *controller.Context) error {
 	if err != nil {
 		return err
 	}
+	applySuspend(c, cluster)
 	if err := c.Apply(cluster); err != nil {
 		return err
 	}
