@@ -27,6 +27,9 @@ func StatusTiDB(c *controller.Context) (controller.Status, error) {
 	if ds := c.GetDataSourceStatus(); ds != nil && !ds.Done {
 		return controller.Restoring(ds.Message), nil
 	}
+	if c.Instance().SuspendRequested() {
+		return suspendStatus(c)
+	}
 
 	pd := &tidbcorev1.PDGroup{}
 	if err := c.Get(pd, c.Name()); err != nil {

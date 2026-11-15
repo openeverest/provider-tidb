@@ -13,6 +13,9 @@ spec:
   executionMode: ProviderManaged
   parametersSchema:
     openAPIV3Schema:
+      description: |-
+        BrBackupParameters describes per-backup parameters (spec.parameters). A full
+        snapshot needs no extra input for now.
       type: object
   providerManaged:
     limits:
@@ -20,6 +23,9 @@ spec:
     supportsPITR: true
   restoreParametersSchema:
     openAPIV3Schema:
+      description: |-
+        BrRestoreParameters describes per-restore parameters (spec.parameters).
+        Restore is implemented separately; kept for forward compatibility.
       type: object
   supportedProviders:
     - tidb

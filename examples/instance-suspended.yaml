@@ -1,0 +1,30 @@
+# A suspended instance: TiDB Operator deletes every pod and keeps the volumes.
+# Set suspended to false to resume it. Suspending or resuming can't be combined
+# with other spec changes. Created suspended, the instance starts no pods and
+# initializes on its first resume.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: tidb-suspended
+spec:
+  providerRef:
+    name: tidb
+  version: "8.5.2"
+  suspend:
+    suspended: true
+  topology:
+    type: cluster
+  components:
+    pd:
+      type: pd
+      replicas: 1
+      storage:
+        size: 10Gi
+    tikv:
+      type: tikv
+      replicas: 1
+      storage:
+        size: 20Gi
+    tidb:
+      type: tidb
+      replicas: 1

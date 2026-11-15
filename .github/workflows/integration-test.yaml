@@ -38,7 +38,7 @@ permissions:
 env:
   IMG: provider-tidb:ci
   # Branch of openeverest/openeverest to build the platform from.
-  OPENEVEREST_BRANCH: main
+  OPENEVEREST_BRANCH: ci/tidb-stack # back to main once openeverest/openeverest#3591 merges
 
 jobs:
   run:

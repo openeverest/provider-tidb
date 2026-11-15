@@ -41,46 +41,57 @@ spec:
     pd:
       parametersSchema:
         openAPIV3Schema:
+          description: PdParameters defines the parameters for pd (Placement Driver) components.
           properties:
             config:
+              description: Config is the inline TOML configuration file for PD.
               type: string
           type: object
       type: pd
     tidb:
       parametersSchema:
         openAPIV3Schema:
+          description: TidbParameters defines the parameters for tidb (SQL layer) components.
           properties:
             config:
+              description: Config is the inline TOML configuration file for TiDB.
               type: string
           type: object
       type: tidb
     tiflash:
       parametersSchema:
         openAPIV3Schema:
+          description: TiflashParameters defines the parameters for tiflash (columnar storage) components.
           properties:
             config:
+              description: Config is the inline TOML configuration file for TiFlash.
               type: string
           type: object
       type: tiflash
     tikv:
       parametersSchema:
         openAPIV3Schema:
+          description: TikvParameters defines the parameters for tikv (storage engine) components.
           properties:
             config:
+              description: Config is the inline TOML configuration file for TiKV.
               type: string
           type: object
       type: tikv
     tiproxy:
       parametersSchema:
         openAPIV3Schema:
+          description: TiproxyParameters defines the parameters for tiproxy (connection proxy) components.
           properties:
             config:
+              description: Config is the inline TOML configuration file for TiProxy.
               type: string
           type: object
       type: tiproxy
   defaultVersion: 8.5.2
   release:
     version: 0.1.1
+  suspend: {}
   topologies:
     cluster:
       components:
@@ -137,49 +148,91 @@ spec:
                 schedulingPolicy: {}
       parametersSchema:
         openAPIV3Schema:
+          description: |-
+            ClusterTopologyParameters defines topology-level parameters for the standard
+            distributed TiDB cluster. Per-component settings are expressed through
+            component specs.
           properties:
             monitoring:
+              description: Monitoring configures metrics collection.
               properties:
                 prometheus:
+                  description: Prometheus configures scraping by the Prometheus Operator.
                   properties:
                     enabled:
+                      description: Enabled creates the PodMonitor; disabling it removes the PodMonitor.
                       type: boolean
                     interval:
+                      description: |-
+                        Interval between scrapes, e.g. 30s. Defaults to the Prometheus global
+                        scrape interval.
                       type: string
                     podMonitorLabels:
                       additionalProperties:
                         type: string
+                      description: |-
+                        PodMonitorLabels are added to the PodMonitor so that the Prometheus
+                        podMonitorSelector picks it up (e.g. release: kube-prometheus-stack).
                       type: object
                   type: object
                 victoriaMetrics:
+                  description: VictoriaMetrics configures scraping by the VictoriaMetrics Operator.
                   properties:
                     enabled:
+                      description: Enabled creates the VMPodScrape; disabling it removes the VMPodScrape.
                       type: boolean
                     interval:
+                      description: |-
+                        Interval between scrapes, e.g. 30s. Defaults to the VMAgent's global
+                        scrape interval.
                       type: string
                     podScrapeLabels:
                       additionalProperties:
                         type: string
+                      description: |-
+                        PodScrapeLabels are added to the VMPodScrape so that a VMAgent's
+                        podScrapeSelector picks it up.
                       type: object
                   type: object
               type: object
             tls:
+              description: |-
+                TLS configures encryption. Both settings are chosen when the Instance is
+                created and cannot be changed afterwards.
               properties:
                 certManager:
+                  description: |-
+                    CertManager issues the certificates with cert-manager. Chosen when the
+                    Instance is created, like the settings above.
                   properties:
                     enabled:
+                      description: |-
+                        Enabled issues the certificates with cert-manager. Without IssuerRef the
+                        provider sets up a self-signed CA in cert-manager for the Instance.
                       type: boolean
                     issuerRef:
+                      description: |-
+                        IssuerRef names the Issuer (in the Instance's namespace) or ClusterIssuer
+                        that signs the certificates; setting it implies Enabled. It must put the
+                        CA into the certificate Secrets (ca.crt), as CA and Vault issuers do.
                       properties:
                         kind:
+                          description: Kind is Issuer (default) or ClusterIssuer.
                           type: string
                         name:
+                          description: Name of the Issuer or ClusterIssuer.
                           type: string
                       type: object
                   type: object
                 client:
+                  description: |-
+                    Client lets MySQL clients connect to TiDB and TiProxy over TLS; TiProxy
+                    then reaches TiDB over TLS too.
                   type: boolean
                 cluster:
+                  description: |-
+                    Cluster encrypts and mutually authenticates the traffic between PD, TiKV,
+                    TiDB, TiFlash and TiProxy.
                   type: boolean
               type: object
           type: object

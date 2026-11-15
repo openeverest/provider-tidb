@@ -57,7 +57,7 @@ work is delegated to the operator.
 
 | provider-tidb | OpenEverest | TiDB Operator | Kubernetes |
 |---|---|---|---|
-| `main` | `main` after `2.0.0-dev.4` (admission webhook, openeverest/openeverest#3362) | `v2.0.1` | `1.30` – `1.36` |
+| `main` | `main` after `2.0.0-dev.4` (admission webhook, openeverest/openeverest#3362) with openeverest/openeverest#3591 (suspend) | `v2.0.1` | `1.30` – `1.36` |
 | `0.2.x` | `>= 2.0.0` | `v2.0.1` | `1.30` – `1.36` |
 | `0.1.x` | `>= 2.0.0` | `v2.0.1` | `1.30` – `1.36` |
 
@@ -88,6 +88,7 @@ is covered under [Installation](#installation).
 | Monitoring | ✅ | Prometheus `PodMonitor` or VictoriaMetrics `VMPodScrape` for PD, TiKV, TiDB, TiFlash and TiProxy (see [Monitoring](#monitoring)) |
 | TLS | ✅ | mTLS between components and TLS for MySQL clients, with provider-issued certificates (see [Security](#security)) |
 | Connection proxy | ✅ | Optional TiProxy: session balancing and connections that survive TiDB restarts and scaling (see [TiProxy](#tiproxy)) |
+| Suspend and resume | ✅ | `spec.suspend.suspended`: TiDB Operator deletes every pod and keeps the volumes (see [Suspend an instance](#suspend-an-instance)) |
 
 Stateful components (PD, TiKV, TiFlash) additionally report:
 
@@ -359,6 +360,30 @@ reaches it. The clone gets the root password recorded with that full backup.
 > Each component group expands into one instance resource per replica — e.g. `spec.components.tidb.replicas: 2`
 > yields two `TiDB` resources (`kubectl get tidb`) and two pods, all belonging to one `TiDBGroup`
 > (`kubectl get tidbgroup`). This mirrors how a Deployment owns its Pods.
+
+### Suspend an instance
+
+Stop an instance's compute and keep its data, to save cost, with
+`spec.suspend.suspended: true`; set it back to `false` to resume
+([example](examples/instance-suspended.yaml)):
+
+```bash
+kubectl patch instances.core.openeverest.io my-instance --type merge -p '{"spec":{"suspend":{"suspended":true}}}'
+```
+
+- The provider sets TiDB Operator's `suspendAction.suspendCompute` on the Cluster: the operator
+  deletes the PD, TiKV, TiDB, TiFlash and TiProxy pods and keeps their PVCs.
+- The Instance shows `Suspending`, then `Suspended` once the Cluster reports suspended and no
+  TiProxy pod is left, then `Resuming` and `Ready` after resuming.
+- While suspended, other spec changes are rejected, scheduled backups don't fire, and new Backups
+  and Restores wait. A point-in-time recovery log backup stays configured and catches up on resume;
+  nothing is written while suspended.
+- The action is applied only while suspended; on resume the provider stops applying it and
+  server-side apply removes it.
+- An Instance created suspended starts no pods; it initializes on its first resume.
+
+On LKE with Linode block storage, a 1 PD / 1 TiKV / 1 TiDB / 1 TiProxy instance was suspended in
+about 30 s and ready again about 100 s after resuming.
 
 ### Presets
 
