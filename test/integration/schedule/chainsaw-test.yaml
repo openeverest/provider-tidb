@@ -37,7 +37,7 @@ spec:
               for g in pdgroup tikvgroup tidbgroup; do
                 until kubectl -n $NAMESPACE get $g/sched >/dev/null 2>&1; do sleep 1; done
                 kubectl -n $NAMESPACE patch $g/sched --subresource status --type merge \
-                  -p '{"status":{"version":"v8.5.2","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=sched"}}'
+                  -p '{"status":{"version":"v8.5.8","replicas":1,"readyReplicas":1,"currentReplicas":1,"updatedReplicas":1,"selector":"app.kubernetes.io/instance=sched"}}'
               done
         - assert:
             file: 10-assert.yaml

@@ -4,4 +4,4 @@ kind: Instance
 metadata:
   name: test-instance
 spec:
-  version: "8.5.2"
+  version: "8.5.8"

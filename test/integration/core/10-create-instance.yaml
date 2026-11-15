@@ -9,7 +9,7 @@ metadata:
 spec:
   providerRef:
     name: tidb
-  version: "7.5.5"
+  version: "7.5.8"
   topology:
     type: cluster
     parameters:

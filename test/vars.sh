@@ -15,5 +15,5 @@ export TIDB_OPERATOR_VERSION=${TIDB_OPERATOR_VERSION:-"v2.0.1"}
 echo "TIDB_OPERATOR_VERSION=${TIDB_OPERATOR_VERSION}"
 
 # TiDB engine version (matches the default version bundle in definition/versions.yaml).
-export TIDB_ENGINE_VERSION=${TIDB_ENGINE_VERSION:-"v8.5.2"}
+export TIDB_ENGINE_VERSION=${TIDB_ENGINE_VERSION:-"v8.5.8"}
 echo "TIDB_ENGINE_VERSION=${TIDB_ENGINE_VERSION}"

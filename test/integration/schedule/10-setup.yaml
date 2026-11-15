@@ -31,7 +31,7 @@ metadata:
 spec:
   providerRef:
     name: tidb
-  version: "8.5.2"
+  version: "8.5.8"
   topology:
     type: cluster
   components:

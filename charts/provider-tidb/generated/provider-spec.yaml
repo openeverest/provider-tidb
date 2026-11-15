@@ -3,32 +3,56 @@
 spec:
   componentTypes:
     pd:
-      defaultVersion: v8.5.2
+      defaultVersion: v8.5.8
       versions:
-        - image: pingcap/pd:v8.5.2
+        - image: pingcap/pd:v8.5.8
+          version: v8.5.8
+        - image: pingcap/pd:v7.5.8
+          version: v7.5.8
+        - deprecated: true
+          image: pingcap/pd:v8.5.2
           version: v8.5.2
-        - image: pingcap/pd:v7.5.5
+        - deprecated: true
+          image: pingcap/pd:v7.5.5
           version: v7.5.5
     tidb:
-      defaultVersion: v8.5.2
+      defaultVersion: v8.5.8
       versions:
-        - image: pingcap/tidb:v8.5.2
+        - image: pingcap/tidb:v8.5.8
+          version: v8.5.8
+        - image: pingcap/tidb:v7.5.8
+          version: v7.5.8
+        - deprecated: true
+          image: pingcap/tidb:v8.5.2
           version: v8.5.2
-        - image: pingcap/tidb:v7.5.5
+        - deprecated: true
+          image: pingcap/tidb:v7.5.5
           version: v7.5.5
     tiflash:
-      defaultVersion: v8.5.2
+      defaultVersion: v8.5.8
       versions:
-        - image: pingcap/tiflash:v8.5.2
+        - image: pingcap/tiflash:v8.5.8
+          version: v8.5.8
+        - image: pingcap/tiflash:v7.5.8
+          version: v7.5.8
+        - deprecated: true
+          image: pingcap/tiflash:v8.5.2
           version: v8.5.2
-        - image: pingcap/tiflash:v7.5.5
+        - deprecated: true
+          image: pingcap/tiflash:v7.5.5
           version: v7.5.5
     tikv:
-      defaultVersion: v8.5.2
+      defaultVersion: v8.5.8
       versions:
-        - image: pingcap/tikv:v8.5.2
+        - image: pingcap/tikv:v8.5.8
+          version: v8.5.8
+        - image: pingcap/tikv:v7.5.8
+          version: v7.5.8
+        - deprecated: true
+          image: pingcap/tikv:v8.5.2
           version: v8.5.2
-        - image: pingcap/tikv:v7.5.5
+        - deprecated: true
+          image: pingcap/tikv:v7.5.5
           version: v7.5.5
     tiproxy:
       defaultVersion: v1.3.3
@@ -78,7 +102,7 @@ spec:
               type: string
           type: object
       type: tiproxy
-  defaultVersion: 8.5.2
+  defaultVersion: 8.5.8
   release:
     version: 0.1.1
   topologies:
@@ -668,6 +692,20 @@ spec:
         - monitoring
         - advanced
   versions:
+    - components:
+        pd: v8.5.8
+        tidb: v8.5.8
+        tiflash: v8.5.8
+        tikv: v8.5.8
+        tiproxy: v1.3.3
+      name: 8.5.8
+    - components:
+        pd: v7.5.8
+        tidb: v7.5.8
+        tiflash: v7.5.8
+        tikv: v7.5.8
+        tiproxy: v1.3.3
+      name: 7.5.8
     - components:
         pd: v8.5.2
         tidb: v8.5.2

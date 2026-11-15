@@ -36,6 +36,46 @@ func TestPresetsPinDefaultVersion(t *testing.T) {
 	}
 }
 
+// TestDefaultsAreNotDeprecated keeps new instances off deprecated versions:
+// deprecated entries exist only for instances already running them.
+func TestDefaultsAreNotDeprecated(t *testing.T) {
+	var generated struct {
+		Spec corev1alpha1.ProviderSpec `json:"spec"`
+	}
+	readYAML(t, "../../charts/provider-tidb/generated/provider-spec.yaml", &generated)
+	spec := generated.Spec
+
+	deprecated := func(typeName, version string) bool {
+		for _, v := range spec.ComponentTypes[typeName].Versions {
+			if v.Version == version {
+				return v.Deprecated
+			}
+		}
+		t.Errorf("component type %q has no version %q", typeName, version)
+		return false
+	}
+	for name, ct := range spec.ComponentTypes {
+		if deprecated(name, ct.DefaultVersion) {
+			t.Errorf("component type %q defaults to deprecated version %q", name, ct.DefaultVersion)
+		}
+	}
+	var found bool
+	for _, b := range spec.Versions {
+		if b.Name != spec.DefaultVersion {
+			continue
+		}
+		found = true
+		for comp, version := range b.Components {
+			if deprecated(spec.Components[comp].Type, version) {
+				t.Errorf("default bundle %q pins %s to deprecated version %q", b.Name, comp, version)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("default bundle %q is not in the catalog", spec.DefaultVersion)
+	}
+}
+
 func readYAML(t *testing.T, path string, out any) {
 	t.Helper()
 	data, err := os.ReadFile(path)
