@@ -16,13 +16,6 @@
 - apiGroups:
     - ""
   resources:
-    - events
-  verbs:
-    - create
-    - patch
-- apiGroups:
-    - ""
-  resources:
     - namespaces
   verbs:
     - get
@@ -45,6 +38,14 @@
     - patch
     - update
     - watch
+- apiGroups:
+    - ""
+    - events.k8s.io
+  resources:
+    - events
+  verbs:
+    - create
+    - patch
 - apiGroups:
     - backup.openeverest.io
   resources:

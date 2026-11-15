@@ -7,7 +7,7 @@ $(LOCALBIN):
 CONTAINER_TOOL ?= docker
 
 # OpenEverest branch to use for OpenEverest CRD installation.
-OPENEVEREST_BRANCH ?= 42db4c38b13c127366d514a91201398a3ba7c444
+OPENEVEREST_BRANCH ?= db82ef6151acd7da6604b2cb998dfb97b14425b1
 
 # TiDB Operator (v2) version whose CRDs and image the provider targets.
 OPERATOR_VERSION ?= v2.0.1
@@ -53,8 +53,8 @@ help: ## Display this help.
 ##@ Development
 
 .PHONY: run
-run: generate ## Run the provider locally.
-	go run cmd/provider/main.go
+run: generate ## Run the provider locally, without the admission webhook (it needs the chart's certificate).
+	go run cmd/provider/main.go --admission=false
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint.

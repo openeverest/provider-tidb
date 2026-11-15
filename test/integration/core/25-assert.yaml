@@ -1,5 +1,5 @@
-# Validate rejects the change, so the Instance is not Ready (ValidationFailed)
-# and the Cluster keeps TLS on.
+# The change is checked against the live Cluster, so admission only warns and
+# the reconciler blocks it: the Cluster keeps TLS on.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
@@ -7,7 +7,7 @@ metadata:
 status:
   (conditions[?type == 'Ready']):
     - status: "False"
-      reason: ValidationFailed
+      reason: InvalidReference
 ---
 apiVersion: core.pingcap.com/v1alpha1
 kind: Cluster

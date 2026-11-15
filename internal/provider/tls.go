@@ -370,11 +370,12 @@ func pemEncode(blockType string, der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: blockType, Bytes: der})
 }
 
-// validateTLS rejects changing the TLS settings of an existing cluster: the
-// operator only takes them when the cluster is created.
+// validateTLS checks that cert-manager is installed when it is asked for, and
+// rejects changing the TLS settings of an existing cluster: the operator only
+// takes them when the cluster is created.
 func validateTLS(c *controller.Context) error {
 	requested := tlsSettings(c)
-	if err := validateCertManager(c, requested); err != nil {
+	if err := validateCertManagerCRD(c, requested); err != nil {
 		return err
 	}
 

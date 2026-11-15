@@ -86,7 +86,7 @@ func TestValidateTiDBVersionChanges(t *testing.T) {
 				objs = append(objs, runningGroups(tt.runningVersion)...)
 			}
 			c := validationContext(t, testInstance(tt.bundle), objs...)
-			assertError(t, ValidateTiDB(c), tt.wantErr)
+			assertError(t, validateAll(c), tt.wantErr)
 		})
 	}
 }
@@ -98,7 +98,7 @@ func TestValidateTiDBExplicitComponentVersionWins(t *testing.T) {
 	in.Spec.Components[common.ComponentTiDB] = tidb
 
 	c := validationContext(t, in, append([]client.Object{testProvider()}, runningGroups("v8.5.2")...)...)
-	assertError(t, ValidateTiDB(c), "downgrading tidb from v8.5.2 to v7.5.5 is not supported")
+	assertError(t, validateAll(c), "downgrading tidb from v8.5.2 to v7.5.5 is not supported")
 }
 
 const testNamespace = "db"
@@ -164,4 +164,24 @@ func assertError(t *testing.T, err error, want string) {
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("error = %v, want it to contain %q", err, want)
 	}
+}
+
+// validateAll runs the checks the runtime runs before Sync: Validate with the
+// Provider the client holds, then ValidateReferences. It returns their errors,
+// or nil when there are none.
+func validateAll(c *controller.Context) error {
+	p := New()
+	provider := &corev1alpha1.Provider{}
+	if err := c.Client().Get(c.Context(), client.ObjectKey{Name: common.ProviderName}, provider); err != nil {
+		provider = nil
+	}
+	errs := p.Validate(controller.ValidationInput{Instance: c.Instance(), Provider: provider}).Errors
+	if len(errs) == 0 {
+		refs, err := p.ValidateReferences(c)
+		if err != nil {
+			return err
+		}
+		errs = refs
+	}
+	return errs.ToAggregate()
 }

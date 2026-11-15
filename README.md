@@ -57,6 +57,7 @@ work is delegated to the operator.
 
 | provider-tidb | OpenEverest | TiDB Operator | Kubernetes |
 |---|---|---|---|
+| `main` | `main` after `2.0.0-dev.4` (admission webhook, openeverest/openeverest#3362) | `v2.0.1` | `1.30` – `1.36` |
 | `0.2.x` | `>= 2.0.0` | `v2.0.1` | `1.30` – `1.36` |
 | `0.1.x` | `>= 2.0.0` | `v2.0.1` | `1.30` – `1.36` |
 
@@ -105,13 +106,14 @@ See [ROADMAP.md](ROADMAP.md) for the planned work.
 > works if their StorageClass sets `allowVolumeExpansion: true`
 > (`kubectl get storageclass <name> -o jsonpath='{.allowVolumeExpansion}'`). On a StorageClass
 > without it — e.g. the k3s/kind `local-path` default — the TiDB Operator leaves the volumes at their
-> old size. Volumes can never be shrunk; `Validate` rejects a smaller size.
+> old size. Volumes can never be shrunk; the provider holds back a smaller size (see
+> [Validation](#validation)).
 
 > [!IMPORTANT]
 > Scaling **TiKV** in takes the removed nodes offline first: the operator evicts their
 > leaders and PD moves their regions to the remaining nodes before the pods are deleted. PD keeps
 > `max-replicas` copies of every region (3 by default) and refuses to remove a node once fewer than
-> that would remain, so `Validate` rejects such a scale-in instead of leaving it stuck. The limit is
+> that would remain, so the provider holds back such a scale-in instead of leaving it stuck. The limit is
 > read from `[replication] max-replicas` in the PD `config` (as the `tidb-dev` preset sets it); PD
 > only applies that setting when the cluster is created. Creating or scaling out a smaller cluster
 > is still allowed.
@@ -173,6 +175,11 @@ The chart is self-contained:
   release before the operator and provider start. This requires cluster egress to that URL; point
   `--set crds.url=...` at a mirror for air-gapped clusters, or `--set crds.install=false` to manage
   the CRDs yourself.
+- **It registers an admission webhook**, so an invalid `Instance` is rejected when it is written,
+  by `kubectl`, GitOps or the API, with every error and its field path; see
+  [Validation](#validation). The chart generates the webhook's serving certificate and keeps it
+  across upgrades; set `admission.certManager.enabled=true` to have cert-manager issue it, or
+  supply one through `admission.certs`.
 
 Upgrade and uninstall:
 
@@ -609,8 +616,31 @@ upgrade.
   deployment settings and the bundled `operator` subchart values.
 - **Instance parameters:** per-component `config` (inline TOML) and per-topology parameters,
   defined under [definition/](definition/) and published on the `Provider` resource
-  (`kubectl get provider tidb -o yaml`). The API server and the UI validate user input against
-  these schemas.
+  (`kubectl get provider tidb -o yaml`). The provider rejects an Instance that does not match
+  them (see [Validation](#validation)), and the UI checks the form against them as you type.
+
+### Validation
+
+The provider validates an `Instance` when it is written, through its admission webhook, and again
+before every reconcile:
+
+```console
+$ kubectl apply -f instance.yaml
+The Instance "orders" is invalid: spec.components[pd].replicas: Invalid value: 2: pd replicas must be an odd number, got 2
+```
+
+- **Checked at admission:** the published parameter schemas, the version catalog and the
+  provider's rules about the Instance itself: the name length, the required components, an odd
+  PD count, valid component versions in TiDB's upgrade order and the cert-manager settings.
+- **Checked against the running cluster:** changes the live TiDB groups cannot take (a
+  downgrade, a TiKV scale-in below PD's `max-replicas`, a TiKV memory limit below the minimum, a
+  smaller volume, new TLS settings) and cert-manager's CRDs when `tls.certManager` asks for
+  them. These never block a write: at admission they are
+  warnings, which `kubectl` prints, and the provider then holds the change back, reporting it in
+  the `Instance`'s `Ready` condition with reason `InvalidReference` until it is reverted or the
+  CRD is installed.
+- **In a pull request:** run `kubectl apply --dry-run=server -f <instance>.yaml` in CI to get the
+  same errors and warnings without changing anything.
 
 ### TiKV memory and disk
 
@@ -695,7 +725,7 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 | Operator pod `CrashLoopBackOff` at startup | The TiDB CRDs must exist before the operator starts (see the row above) |
 | Groups created but no pods | Inspect the group/instance status (`kubectl get tidbgroup,tikvgroup,pdgroup`) — the failure is upstream in the operator |
 | Storage size raised but PVCs unchanged | The StorageClass must allow volume expansion; check `kubectl get pvc` and the operator logs |
-| `Instance` turns `Failed` right after an edit, with no message | The provider rejected the change. The reason is in the provider logs (`Validation failed`); see [Known issues](#known-issues). Typical causes: shrinking storage, downgrading or reordering versions, scaling TiKV below PD's `max-replicas`, changing TLS after creation. Revert the change to return to `Ready` |
+| An edit is applied with a `Warning:` and nothing changes | The provider holds the change back; the `Instance`'s `Ready` condition (reason `InvalidReference`) says why. Typical causes: shrinking storage, a downgrade, scaling TiKV below PD's `max-replicas`, changing TLS after creation, or cert-manager's CRDs not being installed. Revert the change, or install the CRD; see [Validation](#validation) |
 | `Backup` or `Restore` stays `Running` | `kubectl get jobs` in the Instance's namespace and the BR job's pod logs; the BR `Backup`/`Restore` (`backups.br.pingcap.com`) conditions carry the reason |
 | TiProxy runs but does not migrate sessions | `kubectl get cluster.core.pingcap.com <instance> -o jsonpath='{.spec.featureGates}'` must list `SessionTokenSigning`. On an existing Instance the provider adds it only once every TiDB instance lists `FeatureModification` (`kubectl get tidb -o jsonpath='{.items[*].spec.features}'`); see [TiProxy](#tiproxy) |
 | TiKV pods restart with `OOMKilled`, or writes fail with `tikv disk full` early | The TiKV memory limit or volume is too small; see [TiKV memory and disk](#tikv-memory-and-disk) |
@@ -703,9 +733,6 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 
 ## Known issues
 
-- **Rejected changes show no reason.** When `Validate` rejects a change the `Instance` turns
-  `Failed` without a message; the reason is only in the provider logs. Fixed in the OpenEverest
-  provider runtime (openeverest/openeverest#3346) and picked up once a release includes it.
 - **No certificate rotation** ([#66](https://github.com/openeverest/provider-tidb/issues/66)).
   Certificates are issued for ten years and not renewed (see [Security](#security)).
 

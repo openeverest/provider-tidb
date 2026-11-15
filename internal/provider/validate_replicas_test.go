@@ -64,7 +64,7 @@ func TestValidateTiDBTiKVScaleIn(t *testing.T) {
 				group.Spec.Replicas = tt.current
 				objs = append(objs, group)
 			}
-			assertError(t, ValidateTiDB(validationContext(t, in, objs...)), tt.wantErr)
+			assertError(t, validateAll(validationContext(t, in, objs...)), tt.wantErr)
 		})
 	}
 }

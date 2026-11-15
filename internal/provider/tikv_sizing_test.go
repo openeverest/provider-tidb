@@ -173,7 +173,7 @@ func TestValidateTiKVMemory(t *testing.T) {
 				group.Spec.Template.Spec.Resources.Memory = &mem
 				objs = append(objs, group)
 			}
-			assertError(t, ValidateTiDB(validationContext(t, in, objs...)), tt.wantErr)
+			assertError(t, validateAll(validationContext(t, in, objs...)), tt.wantErr)
 		})
 	}
 }

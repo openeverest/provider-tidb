@@ -11,6 +11,7 @@ package provider
 // +kubebuilder:rbac:groups=core.openeverest.io,resources=providers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 // The runtime writes the connection details returned by Status() into a Secret.
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // The provider creates a bootstrap-sql ConfigMap that sets the root password.
