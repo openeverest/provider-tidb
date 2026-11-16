@@ -19,6 +19,6 @@ maintainers:
 dependencies:
   - name: tidb-operator
     alias: operator
-    version: "v2.0.1"
+    version: v2.2.0
     repository: oci://ghcr.io/pingcap/charts
     condition: operator.enabled
