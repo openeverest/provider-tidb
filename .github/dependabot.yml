@@ -1,0 +1,14 @@
+# TiDB Operator v2 is tracked as the bundled Helm subchart
+# (charts/provider-tidb/Chart.yaml, oci://ghcr.io/pingcap/charts). Its api/v2 Go
+# module is pinned to a commit, so Dependabot cannot follow it; bump it by hand.
+version: 2
+
+updates:
+  - package-ecosystem: "helm"
+    directory: "/charts/provider-tidb"
+    schedule:
+      interval: "daily"
+    allow:
+      - dependency-name: "tidb-operator"
+    labels:
+      - "dependencies"
