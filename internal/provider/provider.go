@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -57,6 +58,7 @@ func New() *Provider {
 				cmapi.AddToScheme,
 				// The ServiceAccount, Role and RoleBinding the BR jobs run as.
 				rbacv1.AddToScheme,
+				autoscalingv2.AddToScheme,
 			},
 			WatchConfigs: []controller.WatchConfig{
 				controller.WatchOwned(&tidbcorev1.Cluster{}),

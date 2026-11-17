@@ -111,7 +111,8 @@ func SyncTiDB(c *controller.Context) error {
 	if err := addTiDBGracefulWait(c, tidbGroup, cluster, hadSessionTokenSigning); err != nil {
 		return err
 	}
-	if err := applyOwnedByCluster(c, owner, tidbGroup); err != nil {
+	if err := applyAutoscalable(c, owner, common.ComponentTiDB, tidb, tidbGroup, &tidbcorev1.TiDBGroup{},
+		func(g *tidbcorev1.TiDBGroup) **int32 { return &g.Spec.Replicas }); err != nil {
 		return err
 	}
 

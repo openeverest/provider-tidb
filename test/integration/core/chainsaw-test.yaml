@@ -1,7 +1,7 @@
 ---
 # Core lifecycle suite: create an Instance, verify the provider produces the
 # TiDB Operator v2 CRs, simulate the operator marking the groups ready, verify
-# the Instance reports Ready, exercise the update paths (scale, CPU/memory,
+# the Instance reports Ready, exercise the update paths (scale, autoscaling, CPU/memory,
 # version bundle, TiFlash, storage), then delete.
 #
 # The TiDB operator itself is NOT deployed here — the provider is exercised in
@@ -18,7 +18,7 @@ spec:
     - script:
         content: kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o yaml
     - script:
-        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,tiflashgroup,podmonitor,vmpodscrape -o yaml
+        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,tiflashgroup,hpa,podmonitor,vmpodscrape -o yaml
     - podLogs:
         namespace: provider-system
         selector: app.kubernetes.io/name=provider-tidb
@@ -121,6 +121,46 @@ spec:
                 kubectl -n $NAMESPACE patch $g/test-instance --subresource status --type merge \
                   -p "{\"status\":{\"currentRevision\":\"rev-resize\",\"updatedReplicas\":$r}}"
               done
+        - assert:
+            file: 11-assert.yaml
+
+    - name: autoscaling-on
+      try:
+        - patch:
+            file: 26-autoscaling-on.yaml
+        - assert:
+            file: 26-assert.yaml
+
+    # Scale like the autoscaler does, through the scale subresource. The status
+    # patch makes the provider sync again, which must not undo the scaling.
+    - name: autoscaler-scales-tidb
+      try:
+        - script:
+            content: |
+              set -e
+              kubectl -n $NAMESPACE scale tidbgroup/test-instance --replicas=4
+              kubectl -n $NAMESPACE patch tidbgroup/test-instance --subresource status --type merge \
+                -p '{"status":{"replicas":4,"readyReplicas":4,"currentReplicas":4,"updatedReplicas":4}}'
+        - assert:
+            file: 11-assert.yaml
+        - assert:
+            file: 27-assert.yaml
+
+    # The UI drops the whole autoscaling block when it is switched off.
+    - name: autoscaling-off
+      try:
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch instance/test-instance --type json \
+                -p '[{"op":"remove","path":"/spec/components/tidb/parameters/autoscaling"}]'
+        - error:
+            file: 28-error.yaml
+        - assert:
+            file: 17-assert.yaml
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch tidbgroup/test-instance --subresource status --type merge \
+                -p '{"status":{"replicas":2,"readyReplicas":2,"currentReplicas":2,"updatedReplicas":2}}'
         - assert:
             file: 11-assert.yaml
 

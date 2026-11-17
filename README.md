@@ -80,6 +80,7 @@ is covered under [Installation](#installation).
 |---|---|---|
 | Provisioning | ✅ | PD + TiKV + TiDB, optionally TiFlash and TiProxy |
 | Horizontal scaling | ✅ | Per-component `replicas`; TiKV can't be scaled in below PD's `max-replicas` (see below) |
+| Autoscaling | ✅ | CPU-based HorizontalPodAutoscaler for TiDB (see [Autoscaling](#autoscaling)) |
 | Vertical scaling (CPU / memory) | ✅ | Per-component `resources` |
 | Custom configuration | ✅ | Inline TOML `config` per component |
 | Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
@@ -450,6 +451,41 @@ recommends 10 seconds more than your longest transaction; values above 20 are cu
 The provider only adds the setting when TiDB restarts anyway: on an Instance created with TiProxy,
 and in the same step that turns on `SessionTokenSigning` on an existing one, so both land in one
 roll. Like the gates, it stays when TiProxy is turned off.
+
+### Autoscaling
+
+TiDB is stateless, so it can follow the load. `parameters.autoscaling` on the `tidb` component
+adds a HorizontalPodAutoscaler that keeps at least the component's `replicas` and adds up to
+`maxReplicas` nodes while the average CPU utilization is above `targetCPUUtilization` (80 by
+default):
+
+```yaml
+spec:
+  components:
+    tidb:
+      type: tidb
+      replicas: 2
+      resources:
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      parameters:
+        autoscaling:
+          maxReplicas: 6
+          targetCPUUtilization: 70
+```
+
+- Utilization is a share of the component's CPU limit, so the component needs one, and the cluster
+  needs the Kubernetes metrics API (metrics-server).
+- While autoscaling is on, the autoscaler owns the node count; the Instance reports `Updating`
+  while nodes are added or removed. Turning autoscaling off returns to `replicas`.
+- The autoscaler removes nodes again after its default 5 minute stabilization window.
+- New TiDB nodes only take new connections. Put [TiProxy](#tiproxy) in front to move existing
+  sessions onto them and to keep sessions open when nodes are removed.
+- PD, TiKV and TiFlash hold data and are not autoscaled. Neither is TiProxy: the bundled TiDB
+  Operator (v2.0.1) does not publish the pod selector of a TiProxyGroup, which the autoscaler needs.
+
+See [examples/instance-autoscaling.yaml](examples/instance-autoscaling.yaml).
 
 ### Monitoring
 

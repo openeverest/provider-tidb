@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -144,7 +145,7 @@ func runningGroups(version string) []client.Object {
 func validationContext(t *testing.T, in *corev1alpha1.Instance, objs ...client.Object) *controller.Context {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	for _, install := range []func(*runtime.Scheme) error{corev1alpha1.AddToScheme, tidbcorev1.Install} {
+	for _, install := range []func(*runtime.Scheme) error{corev1alpha1.AddToScheme, tidbcorev1.Install, autoscalingv2.AddToScheme} {
 		if err := install(scheme); err != nil {
 			t.Fatalf("building scheme: %v", err)
 		}

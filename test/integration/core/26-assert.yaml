@@ -1,0 +1,27 @@
+# The provider hands the TiDBGroup to a HorizontalPodAutoscaler and keeps the
+# current replica count.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: test-instance-tidb
+spec:
+  scaleTargetRef:
+    apiVersion: core.pingcap.com/v1alpha1
+    kind: TiDBGroup
+    name: test-instance
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiDBGroup
+metadata:
+  name: test-instance
+spec:
+  replicas: 2
