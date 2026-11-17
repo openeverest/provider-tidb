@@ -131,9 +131,41 @@ ui:
                   validation:
                     min: 0.5
                     required: true
+            autoscaling:
+              uiType: group
+              groupType: toggleable
+              label: Autoscaling
+              description: "Add TiDB nodes under CPU load, between the number of nodes above and a maximum. Needs the Kubernetes metrics API (metrics-server)."
+              components:
+                limits:
+                  uiType: group
+                  groupType: line
+                  components:
+                    maxReplicas:
+                      path: "spec.components.tidb.parameters.autoscaling.maxReplicas"
+                      uiType: number
+                      fieldParams:
+                        label: "Max nodes"
+                        defaultValue: 4
+                      validation:
+                        min: 1
+                        int: true
+                        required: true
+                    targetCPU:
+                      path: "spec.components.tidb.parameters.autoscaling.targetCPUUtilization"
+                      uiType: number
+                      fieldParams:
+                        label: "Target CPU"
+                        defaultValue: 80
+                        badge: "%"
+                      validation:
+                        min: 1
+                        max: 100
+                        int: true
           componentsOrder:
             - replicas
             - resources
+            - autoscaling
     tikv:
       label: "Storage Layer (TiKV)"
       description: "Distributed key-value storage nodes."

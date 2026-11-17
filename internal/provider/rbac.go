@@ -55,6 +55,9 @@ package provider
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch
 
+// HorizontalPodAutoscaler the provider creates while TiDB autoscaling is on.
+// +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
+
 // Prometheus Operator PodMonitor the provider creates while monitoring is enabled.
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=get;list;watch;create;update;patch;delete
 // VictoriaMetrics Operator VMPodScrape the provider creates while monitoring is enabled.

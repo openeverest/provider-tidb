@@ -74,6 +74,15 @@ spec:
       parametersSchema:
         openAPIV3Schema:
           properties:
+            autoscaling:
+              properties:
+                maxReplicas:
+                  format: int32
+                  type: integer
+                targetCPUUtilization:
+                  format: int32
+                  type: integer
+              type: object
             config:
               type: string
           type: object
@@ -446,6 +455,37 @@ spec:
           components:
             tidbGroup:
               components:
+                autoscaling:
+                  components:
+                    limits:
+                      components:
+                        maxReplicas:
+                          fieldParams:
+                            defaultValue: 4
+                            label: Max nodes
+                          path: spec.components.tidb.parameters.autoscaling.maxReplicas
+                          uiType: number
+                          validation:
+                            int: true
+                            min: 1
+                            required: true
+                        targetCPU:
+                          fieldParams:
+                            badge: '%'
+                            defaultValue: 80
+                            label: Target CPU
+                          path: spec.components.tidb.parameters.autoscaling.targetCPUUtilization
+                          uiType: number
+                          validation:
+                            int: true
+                            max: 100
+                            min: 1
+                      groupType: line
+                      uiType: group
+                  description: Add TiDB nodes under CPU load, between the number of nodes above and a maximum. Needs the Kubernetes metrics API (metrics-server).
+                  groupType: toggleable
+                  label: Autoscaling
+                  uiType: group
                 replicas:
                   fieldParams:
                     defaultValue: 2
@@ -485,6 +525,7 @@ spec:
               componentsOrder:
                 - replicas
                 - resources
+                - autoscaling
               uiType: group
           description: Stateless SQL nodes that speak the MySQL protocol.
           label: SQL Layer (TiDB)

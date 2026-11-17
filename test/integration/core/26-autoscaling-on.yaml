@@ -1,0 +1,12 @@
+# Let TiDB scale between its replicas (2) and 5 on CPU load.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  components:
+    tidb:
+      parameters:
+        autoscaling:
+          maxReplicas: 5
+          targetCPUUtilization: 70

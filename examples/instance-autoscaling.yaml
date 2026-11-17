@@ -1,0 +1,41 @@
+# TiDB scales out under CPU load, between 2 and 6 nodes, behind TiProxy.
+# Needs the Kubernetes metrics API (metrics-server).
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: tidb-autoscaling
+spec:
+  providerRef:
+    name: tidb
+  version: "8.5.8"
+  topology:
+    type: cluster
+  components:
+    pd:
+      type: pd
+      replicas: 3
+      storage:
+        size: 10Gi
+    tikv:
+      type: tikv
+      replicas: 3
+      storage:
+        size: 20Gi
+    tidb:
+      type: tidb
+      replicas: 2
+      resources:
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      parameters:
+        autoscaling:
+          maxReplicas: 6
+          targetCPUUtilization: 70
+    tiproxy:
+      type: tiproxy
+      replicas: 2
+      resources:
+        limits:
+          cpu: "1"
+          memory: 1Gi

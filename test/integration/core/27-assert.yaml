@@ -1,0 +1,7 @@
+# The provider keeps the replica count the autoscaler chose.
+apiVersion: core.pingcap.com/v1alpha1
+kind: TiDBGroup
+metadata:
+  name: test-instance
+spec:
+  replicas: 4
