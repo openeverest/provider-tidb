@@ -116,6 +116,21 @@ func backupDir(c *controller.Context, backup *backupv1alpha1.Backup, bs *backupv
 	return path.Join(location, backup.Name), nil
 }
 
+// sourceBackupDir is where the snapshot of srcBackup is: the folder its BR
+// Backup wrote to while that object exists, which also holds for a backup
+// taken before paths were recorded, otherwise the recorded path.
+func sourceBackupDir(c *controller.Context, srcBackup *backupv1alpha1.Backup, bs *backupv1alpha1.BackupStorage) (string, error) {
+	br := &tidbbrv1.Backup{}
+	found, err := c.Exists(br, srcBackup.Name)
+	if err != nil {
+		return "", fmt.Errorf("get BR backup: %w", err)
+	}
+	if found && br.Spec.S3 != nil && br.Spec.S3.Prefix != "" {
+		return br.Spec.S3.Prefix, nil
+	}
+	return backupDir(c, srcBackup, bs)
+}
+
 // ensureBRCredentials writes the BackupStorage credentials into the Secret
 // name, owned by owner. BR reads S3 credentials from access_key/secret_key,
 // which differ from OpenEverest's AWS_* keys.
@@ -140,6 +155,18 @@ func ensureBRCredentials(c *controller.Context, owner client.Object, name string
 // SyncBackup reconciles a Backup CR into a br.pingcap.com Backup (full snapshot)
 // with inlined S3 storage and a BR-format credentials Secret.
 func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Backup) (controller.BackupExecutionStatus, error) {
+	// The runtime syncs a Backup in every state. Once BR has its job, its
+	// storage stays as created: a backup taken before its path was recorded
+	// keeps its folder, and a later edit of the storage doesn't fail it.
+	existing := &tidbbrv1.Backup{}
+	found, err := c.Exists(existing, backup.Name)
+	if err != nil {
+		return controller.BackupExecutionStatus{}, fmt.Errorf("get BR backup: %w", err)
+	}
+	if found {
+		return brBackupExecutionStatus(existing), nil
+	}
+
 	cluster := &tidbcorev1.Cluster{}
 	if err := c.Get(cluster, c.Name()); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -187,20 +214,20 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 
 	brBackup := &tidbbrv1.Backup{
 		ObjectMeta: metav1.ObjectMeta{Name: backup.Name, Namespace: backup.Namespace},
+		Spec: tidbbrv1.BackupSpec{
+			ServiceAccount:  backupManagerName,
+			Type:            tidbbrv1.BackupTypeFull,
+			Mode:            tidbbrv1.BackupModeSnapshot,
+			CleanPolicy:     cleanPolicyFor(backup.Spec.DeletionPolicy),
+			StorageProvider: tidbbrv1.StorageProvider{S3: rendered.s3},
+			BR:              &tidbbrv1.BRConfig{Cluster: c.Name(), ClusterNamespace: c.Namespace()},
+		},
 	}
-	if _, err := controllerutil.CreateOrUpdate(c.Context(), c.Client(), brBackup, func() error {
-		brBackup.Spec.ServiceAccount = backupManagerName
-		brBackup.Spec.Type = tidbbrv1.BackupTypeFull
-		brBackup.Spec.Mode = tidbbrv1.BackupModeSnapshot
-		brBackup.Spec.CleanPolicy = cleanPolicyFor(backup.Spec.DeletionPolicy)
-		brBackup.Spec.S3 = rendered.s3
-		brBackup.Spec.BR = &tidbbrv1.BRConfig{
-			Cluster:          c.Name(),
-			ClusterNamespace: c.Namespace(),
-		}
-		return controllerutil.SetControllerReference(backup, brBackup, c.Client().Scheme())
-	}); err != nil {
-		return controller.BackupExecutionStatus{}, fmt.Errorf("create or update BR backup: %w", err)
+	if err := controllerutil.SetControllerReference(backup, brBackup, c.Client().Scheme()); err != nil {
+		return controller.BackupExecutionStatus{}, err
+	}
+	if err := c.Client().Create(c.Context(), brBackup); err != nil && !apierrors.IsAlreadyExists(err) {
+		return controller.BackupExecutionStatus{}, fmt.Errorf("create BR backup: %w", err)
 	}
 
 	return brBackupExecutionStatus(brBackup), nil
@@ -276,15 +303,17 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 		return controller.RestoreExecutionStatus{}, fmt.Errorf("get cluster: %w", err)
 	}
 
-	started, err := c.Exists(&tidbbrv1.Restore{}, restore.Name)
+	existing := &tidbbrv1.Restore{}
+	started, err := c.Exists(existing, restore.Name)
 	if err != nil {
 		return controller.RestoreExecutionStatus{}, fmt.Errorf("get BR restore: %w", err)
 	}
-	if !started {
-		blocked, isBlocked, err := restoreBlockedByLogBackup(c)
-		if err != nil || isBlocked {
-			return blocked, err
-		}
+	if started {
+		// Its storage stays as created, whatever happens to the BackupStorage since.
+		return restoreExecutionStatus(c, restore, existing, srcBackup)
+	}
+	if blocked, isBlocked, err := restoreBlockedByLogBackup(c); err != nil || isBlocked {
+		return blocked, err
 	}
 
 	storage, err := c.BackupStorage(srcBackup.Spec.StorageRef.Name)
@@ -294,7 +323,10 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 	// BR reads the backup from the folder SyncBackup wrote it to, under the
 	// path the source backup recorded, so it resolves after the source
 	// Instance is gone.
-	dir, err := backupDir(c, srcBackup, storage)
+	dir, err := sourceBackupDir(c, srcBackup, storage)
+	if isAPIError(err) {
+		return controller.RestoreExecutionStatus{}, err
+	}
 	if err != nil {
 		return controller.RestoreExecutionStatus{
 			State:   backupv1alpha1.RestoreStateFailed,

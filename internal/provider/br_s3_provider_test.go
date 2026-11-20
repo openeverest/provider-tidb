@@ -141,3 +141,68 @@ func TestShippedBackupClass(t *testing.T) {
 		t.Errorf("TLS support = %+v, want none", got)
 	}
 }
+
+// The runtime syncs a Backup in every state and fills in a missing path. A
+// BR backup that already exists keeps the folder it wrote to, and an edit of
+// the storage BR can't take doesn't fail it; a restore reads that folder.
+func TestExistingBRBackupKeepsItsStorage(t *testing.T) {
+	backup := testBackup(backupv1alpha1.BackupStateSucceeded)
+	legacy := &tidbbrv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: "nightly", Namespace: testNamespace}}
+	legacy.Spec.Mode = tidbbrv1.BackupModeSnapshot
+	legacy.Spec.S3 = &tidbbrv1.S3StorageProvider{Bucket: "bucket", Prefix: "db/orders/nightly"}
+	legacy.Status.Phase = tidbbrv1.BackupComplete
+	tlsStorage := testBackupStorage("s3", `{"region":"us-east-1","endpointURL":"https://s3:9000"}`)
+	tlsStorage.Spec.TLS = &commonv1alpha1.TLSConfig{InsecureSkipVerify: true}
+
+	c, cl := brContext(t, backup, legacy)
+	if err := cl.Update(context.Background(), mergeStorage(t, cl, tlsStorage)); err != nil {
+		t.Fatal(err)
+	}
+	exec, err := New().SyncBackup(c, backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exec.State != backupv1alpha1.BackupStateSucceeded {
+		t.Errorf("state = %s %q, want Succeeded", exec.State, exec.Message)
+	}
+	br := &tidbbrv1.Backup{}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(legacy), br); err != nil {
+		t.Fatal(err)
+	}
+	if br.Spec.S3.Prefix != "db/orders/nightly" {
+		t.Errorf("BR backup prefix = %q, want the folder it wrote to", br.Spec.S3.Prefix)
+	}
+
+	restore := &backupv1alpha1.Restore{
+		ObjectMeta: metav1.ObjectMeta{Name: "clone", Namespace: testNamespace},
+		Spec: backupv1alpha1.RestoreSpec{
+			InstanceRef: commonv1alpha1.ObjectRef{Name: "orders"},
+			DataSource: backupv1alpha1.DataSource{
+				Type:   backupv1alpha1.DataSourceTypeBackup,
+				Backup: &backupv1alpha1.DataSourceBackup{BackupRef: commonv1alpha1.ObjectRef{Name: "nightly"}},
+			},
+		},
+	}
+	c, cl = brContext(t, backup, legacy, restore)
+	if _, err := New().SyncRestore(c, restore); err != nil {
+		t.Fatal(err)
+	}
+	brr := &tidbbrv1.Restore{}
+	if err := cl.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "clone"}, brr); err != nil {
+		t.Fatal(err)
+	}
+	if brr.Spec.S3.Prefix != "db/orders/nightly" {
+		t.Errorf("BR restore reads %q, want the source BR backup's folder", brr.Spec.S3.Prefix)
+	}
+}
+
+// mergeStorage returns the stored BackupStorage named like bs with bs's spec.
+func mergeStorage(t *testing.T, cl client.Client, bs *backupv1alpha1.BackupStorage) *backupv1alpha1.BackupStorage {
+	t.Helper()
+	stored := &backupv1alpha1.BackupStorage{}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(bs), stored); err != nil {
+		t.Fatal(err)
+	}
+	stored.Spec = bs.Spec
+	return stored
+}

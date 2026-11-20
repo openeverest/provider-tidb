@@ -205,9 +205,9 @@ data.
   bindings and to namespaces, and drops its `PodMonitor` and `VMPodScrape` permissions.
 - **Breaking:** `BackupStorage`s use core's backup storage classes (`backupStorageClassRef`,
   `location`, `parameters`, `authentication`, `tls`; see [Backup storages](#backup-storages)).
-  Backups and the point-in-time recovery log move to a path per Instance, so restores of
-  backups taken before the upgrade, which lack `status.path`, fail with `BackupLocationUnknown`,
-  and the log backup starts a new stream: take a full backup after the upgrade.
+  New backups and the point-in-time recovery log move to a path per Instance. A backup taken
+  before the upgrade keeps the folder its BR backup wrote to, and restores read it from there;
+  the log backup starts a new stream, so take a full backup after the upgrade.
 - The `br` BackupClass names the provider in `providerManaged.providerRef` and declares the `s3`
   storage class it writes to. The provider claims it, so the chart grants it `patch` on
   `backupclasses/status` and read access to `backupstorageclasses`.
