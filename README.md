@@ -355,7 +355,8 @@ reaches it. The clone gets the root password recorded with that full backup.
 
 ### Presets
 
-The chart ships `InstancePreset`s, so the UI can create a working cluster in one click:
+The chart ships cluster-scoped `ClusterInstancePreset`s, so the UI can create a working cluster in
+one click in any namespace:
 
 | Preset | PD | TiKV | TiDB | TiFlash | TiProxy | Use it for |
 |---|---|---|---|---|---|---|
@@ -366,10 +367,9 @@ The chart ships `InstancePreset`s, so the UI can create a working cluster in one
 `tidb-dev` has no redundancy and sets PD's `max-replicas` to `1`, so PD stops trying to place
 three copies of the data on its single TiKV node. To try TiFlash on it, add a `tiflash`
 component with at least 4 GiB of memory; TiFlash is killed for running out of memory at 3 GiB.
-Presets pin the default version bundle; a unit test fails if they fall behind it. Sizes and the
-list itself
-live under `presets:` in [values.yaml](charts/provider-tidb/values.yaml); set `enabled: false`
-to hide one.
+Presets pin the default version bundle; a unit test fails if they fall behind it. They reference
+no namespaced objects, such as Secrets or backup storages. Sizes and the list itself live under
+`presets:` in [values.yaml](charts/provider-tidb/values.yaml); set `enabled: false` to hide one.
 
 ### TiProxy
 

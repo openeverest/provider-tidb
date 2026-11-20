@@ -19,8 +19,8 @@ func TestPresetsPinDefaultVersion(t *testing.T) {
 	readYAML(t, "../../charts/provider-tidb/generated/provider-spec.yaml", &generated)
 	var values struct {
 		Presets []struct {
-			Name string                          `json:"name"`
-			Spec corev1alpha1.InstancePresetSpec `json:"spec"`
+			Name string                                 `json:"name"`
+			Spec corev1alpha1.ClusterInstancePresetSpec `json:"spec"`
 		} `json:"presets"`
 	}
 	readYAML(t, "../../charts/provider-tidb/values.yaml", &values)
