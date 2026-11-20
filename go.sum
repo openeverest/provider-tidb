@@ -202,10 +202,10 @@ github.com/onsi/ginkgo/v2 v2.33.0 h1:C8gBA6Uc2ZEubiV+SXiu5tZnMTwEmXHgkJwGozKtZf8
 github.com/onsi/ginkgo/v2 v2.33.0/go.mod h1:+aXOY+vzZ5mu2iI2HpTZUPmM//oQfsNFX6gU9kNcA44=
 github.com/onsi/gomega v1.44.0 h1:eAiGl3Pw5jz5GQdDff0BcxYpAX1JxW8xD7mFUuwNfZQ=
 github.com/onsi/gomega v1.44.0/go.mod h1:e/C2HwaZ1DhvjzXXuFhcR7hY7Sh9pl7MmoWKEjzwcdA=
-github.com/openeverest/openeverest/v2 v2.0.0-dev.2.0.20261119102452-a30ecb4b3a8f h1:mFBwkiQ7anWgaJ7KiBaXW+EfkGwn/bMKdAIpsBpeGU8=
-github.com/openeverest/openeverest/v2 v2.0.0-dev.2.0.20261119102452-a30ecb4b3a8f/go.mod h1:W532Ik76wPly3zvUKTDjyG34Hui+lTWLGMtxOi1yAXI=
-github.com/openeverest/provider-sdk v0.3.1-0.20261117185841-9daa99317188 h1:P15QtHepxSrOLhTMALX1z9uUYroD7VJh5igFyrO0pBE=
-github.com/openeverest/provider-sdk v0.3.1-0.20261117185841-9daa99317188/go.mod h1:95L3BP8xrG3MxuiDCoAD6zWq+jc60rK+5dxSF2B/JF8=
+github.com/openeverest/openeverest/v2 v2.0.0-alpha.1 h1:AhaWWpcDdPxwO00cINj9RFuEE7WoQIilmokNaJDvYy0=
+github.com/openeverest/openeverest/v2 v2.0.0-alpha.1/go.mod h1:mYF7STRFhUBgGYCmjdiX9j2NUNTBRW6rBlgzUd3Qb4k=
+github.com/openeverest/provider-sdk v0.4.0 h1:rtVBt+MrUl1egEQyAltrP4OfiuiorXTLbDkf+RRoOmY=
+github.com/openeverest/provider-sdk v0.4.0/go.mod h1:a4LuccW4OQdgJXLhMFOqvUdISUdOI4tyWYL65d9OiDs=
 github.com/pingcap/tidb-operator/api/v2 v2.0.0-20260325134427-c1490b6fd060 h1:qafGtusecQfBUK/8VaWJ3NYVY+2IxIBQ3/XpeD6GEoQ=
 github.com/pingcap/tidb-operator/api/v2 v2.0.0-20260325134427-c1490b6fd060/go.mod h1:etOVTzWYkxeibuz6hd+Xx4wK3hUdQY7mLEzr/7aTcjU=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=

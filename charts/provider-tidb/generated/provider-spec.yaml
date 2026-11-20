@@ -131,7 +131,7 @@ spec:
       tiproxy:
         metrics: Native
   release:
-    version: 0.1.1
+    version: 0.3.0
   topologies:
     cluster:
       components:

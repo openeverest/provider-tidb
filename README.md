@@ -57,9 +57,12 @@ work is delegated to the operator.
 
 | provider-tidb | OpenEverest | TiDB Operator | Kubernetes |
 |---|---|---|---|
-| `main` | `main` after `2.0.0-dev.4` (admission webhook, openeverest/openeverest#3362) | `v2.0.1` | `1.30` – `1.36` |
-| `0.2.x` | `>= 2.0.0` | `v2.0.1` | `1.30` – `1.36` |
-| `0.1.x` | `>= 2.0.0` | `v2.0.1` | `1.30` – `1.36` |
+| `0.3.x` | `2.0.0-alpha.1` | `v2.0.1` | `1.32` – `1.36` |
+| `0.2.x` | `2.0.0-dev.4` and earlier previews | `v2.0.1` | `1.30` – `1.36` |
+| `0.1.x` | `2.0.0-dev.4` and earlier previews | `v2.0.1` | `1.30` – `1.36` |
+
+SemVer ranks `2.0.0-dev.*` above `2.0.0-alpha.1`, so the rows name exact OpenEverest versions
+rather than ranges.
 
 Optional integrations, needed only for the features that use them:
 
@@ -193,6 +196,9 @@ Uninstalling the chart does **not** delete running `Instance` resources, the TiD
 data.
 
 ### Upgrading from 0.2.x
+
+0.3.x is built for OpenEverest `2.0.0-alpha.1`, which has no conversion from the developer
+previews: install both on a fresh cluster. The changes, for reference:
 
 - **Breaking:** the **Monitoring** toggles (`spec.topology.parameters.monitoring`) and the
   chart's `podMonitor.labels` and `vmPodScrape.labels` are gone, and the provider no longer

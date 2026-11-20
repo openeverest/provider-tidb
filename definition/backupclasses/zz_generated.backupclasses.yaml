@@ -4,7 +4,7 @@ apiVersion: backup.openeverest.io/v1alpha1
 kind: BackupClass
 metadata:
   annotations:
-    openeverest.io/provider-version: 0.1.1
+    openeverest.io/provider-version: 0.3.0
   name: br
 spec:
   backupStorageClasses:
