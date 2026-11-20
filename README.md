@@ -127,7 +127,7 @@ See [ROADMAP.md](ROADMAP.md) for the planned work.
 > `ALTER TABLE ... SET TIFLASH REPLICA 0` on those tables before scaling TiFlash in or turning it off.
 > PD also refuses to remove a store if fewer stores than its `max-replicas` (3 by default) would be
 > left, so a cluster with fewer TiKV nodes than that can't turn TiFlash off.
-> The Instance reports `Updating` with `tiflash (removing)` until the nodes are gone.
+> The Instance's `Ready` condition is `False` with `tiflash (removing)` until the nodes are gone.
 >
 > Once a table has TiFlash replicas, the optimizer may read it from TiFlash in *any* session,
 > including parts of OLTP transactions. If TiFlash is busy with analytical queries, those
@@ -149,7 +149,7 @@ See [ROADMAP.md](ROADMAP.md) for the planned work.
 > TiDB Operator v2 has no controller for `BackupSchedule`, so the provider runs
 > `spec.backup.storages[].schedules` itself: each cron slot creates a `Backup` (with
 > `spec.scheduleName`) that runs like an on-demand one. A slot fires only while the Instance is
-> `Ready` or `Updating` and no earlier run of the same schedule is in progress, and is skipped if
+> `Available` and no earlier run of the same schedule is in progress, and is skipped if
 > it can't start within 10 minutes. Retention is anchored on successful backups: `count: N` keeps
 > the N newest successful backups, and `time` keeps everything inside the window plus the newest
 > successful backup. Pruned backups follow their own `deletionPolicy`. An invalid cron expression
@@ -418,6 +418,25 @@ reaches it. The clone gets the root password recorded with that full backup.
 > yields two `TiDB` resources (`kubectl get tidb`) and two pods, all belonging to one `TiDBGroup`
 > (`kubectl get tidbgroup`). This mirrors how a Deployment owns its Pods.
 
+### Status
+
+The provider reports facts about the TiDB cluster; OpenEverest derives the Instance's phase
+(`Pending`, `Provisioned`, `Terminating`) and conditions from them:
+
+- **`Ready`** once every component group runs the replicas and version asked for. Until then its
+  message lists what is waited for, e.g. `tikv (2/3 ready: <operator reason>)`.
+- **`Available`** while clients can connect: the SQL tier they connect to (TiProxy when it's on,
+  otherwise TiDB) has a ready pod, PD has quorum and at most one TiKV node is down, so it stays
+  `True` through a rolling restart. With more TiKV nodes down it is `Unknown`: whether every Region
+  keeps a majority of its replicas depends on where PD placed them. The connection Secret is
+  published as soon as the Instance is available.
+- **Problems**: a pod stuck in `CrashLoopBackOff` (at kubelet's longest back-off),
+  `ImagePullBackOff`, `ErrImageNeverPull`, `InvalidImageName` or `CreateContainerConfigError`,
+  named by that reason.
+- **Operations**: `Restoring` while a new Instance is seeded from `spec.dataSource`, `Upgrading`
+  while a group rolls out a new version.
+- **Desired replicas** per component, so clients show e.g. `2/3` while one pod restarts.
+
 ### Presets
 
 The chart ships cluster-scoped `ClusterInstancePreset`s, so the UI can create a working cluster in
@@ -461,7 +480,7 @@ spec:
 ```
 
 Setting the replica count to `0` (or removing the component) deletes the TiProxy nodes; the
-Instance reports `Updating` with `tiproxy (removing)` until they are gone.
+Instance's `Ready` condition is `False` with `tiproxy (removing)` until they are gone.
 
 > [!IMPORTANT]
 > **Turning TiProxy on or off changes the connection endpoint.** While TiProxy runs, the
@@ -496,7 +515,7 @@ lets feature gates change on a `Cluster` that already has `FeatureModification` 
   carries it, the provider turns on `SessionTokenSigning`, and the operator **replaces the TiDB
   pods one at a time** (a new pod starts before an old one stops). TiProxy balances connections
   from the start, but sessions on the TiDB pods that predate the signing certificate cannot be
-  migrated, so this one roll closes them. Expect the Instance to be `Updating` until it is done.
+  migrated, so this one roll closes them. Expect the Instance not to be `Ready`, while it stays `Available`, until it is done.
 
 The gates and the signing certificate stay when TiProxy is turned off, so turning it on again
 does not restart TiDB.
@@ -765,7 +784,7 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 
 | Symptom | Where to look |
 |---|---|
-| `Instance` stuck in `Provisioning` | `kubectl describe instances.core.openeverest.io <name>` conditions, then the provider logs |
+| `Instance` stuck `Pending`, or `Ready` stays `False` | `kubectl describe instances.core.openeverest.io <name>`: the `Ready` condition's message names the components waited for; then the provider logs |
 | No `Provider` resource in the cluster | Is the chart installed? Check the provider deployment logs |
 | `Instance` ignored entirely | `spec.providerRef.name` must be `tidb` |
 | Provider logs `no matches for kind "TiKVGroup"` | TiDB CRDs missing. The chart's pre-install hook installs them; check the `<release>-crd-installer` Job (and its egress to `crds.url`), or apply them manually: `kubectl apply --server-side -f <crds.url>` |

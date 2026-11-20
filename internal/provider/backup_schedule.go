@@ -12,6 +12,7 @@ import (
 
 	"github.com/robfig/cron/v3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -272,9 +273,10 @@ func dnsLabel(s string) string {
 	}, s)
 }
 
-// instanceCanBackUp reports whether the cluster is serving and can take a backup.
+// instanceCanBackUp reports whether the cluster is serving and can take a
+// backup: clients can connect, so PD and TiKV, which BR talks to, are up.
 func instanceCanBackUp(in *corev1alpha1.Instance) bool {
-	return in.Status.Phase == corev1alpha1.InstancePhaseReady || in.Status.Phase == corev1alpha1.InstancePhaseUpdating
+	return meta.IsStatusConditionTrue(in.Status.Conditions, corev1alpha1.ConditionAvailable)
 }
 
 func backupsOfSchedule(all []backupv1alpha1.Backup, schedule string) []backupv1alpha1.Backup {

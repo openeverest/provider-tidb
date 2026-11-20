@@ -7,7 +7,7 @@ $(LOCALBIN):
 CONTAINER_TOOL ?= docker
 
 # OpenEverest branch to use for OpenEverest CRD installation.
-OPENEVEREST_BRANCH ?= 3a639f48ff47ba0f8cafe196107b8399f07493fd
+OPENEVEREST_BRANCH ?= a30ecb4b3a8fef011ab501e5e496e87add9ee50f
 
 # TiDB Operator (v2) version whose CRDs and image the provider targets.
 OPERATOR_VERSION ?= v2.0.1

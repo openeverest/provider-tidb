@@ -1,5 +1,5 @@
 # Once every group reports its desired replicas ready, the provider's Status()
-# must surface phase Ready on the Instance. The runtime reports each component's
+# reports it converged, so the Instance is Provisioned and Ready. The runtime reports each component's
 # pods by the labels the provider sets; pod counts and the optional TiFlash
 # entry vary between steps and suites, so only the core selectors are asserted.
 apiVersion: core.openeverest.io/v1alpha1
@@ -7,7 +7,8 @@ kind: Instance
 metadata:
   name: test-instance
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
   (components[?name == 'pd'].selector):
     - core.openeverest.io/component=pd,core.openeverest.io/instance=test-instance
   (components[?name == 'tikv'].selector):

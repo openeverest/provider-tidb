@@ -25,7 +25,8 @@ kind: Instance
 metadata:
   name: clone
 status:
-  phase: Ready
+  phase: Provisioned
+  (conditions[?type == 'Ready'].status | [0]): "True"
   (conditions[?type == 'DataSourceReady']):
     - status: "True"
 ---

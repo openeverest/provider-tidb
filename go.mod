@@ -5,11 +5,12 @@ go 1.27.1
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/cert-manager/cert-manager v1.20.3
-	github.com/openeverest/openeverest/v2 v2.0.0-dev.2.0.20261117185355-3a639f48ff47
+	github.com/openeverest/openeverest/v2 v2.0.0-dev.2.0.20261119102452-a30ecb4b3a8f
 	github.com/pingcap/tidb-operator/api/v2 v2.0.0-20260325134427-c1490b6fd060
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/mod v0.42.0
 	k8s.io/api v0.37.2
+	k8s.io/apiextensions-apiserver v0.37.2
 	k8s.io/apimachinery v0.37.2
 	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3
 	sigs.k8s.io/controller-runtime v0.25.2
@@ -131,7 +132,6 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apiextensions-apiserver v0.37.2 // indirect
 	k8s.io/apiserver v0.37.2 // indirect
 	k8s.io/client-go v0.37.2 // indirect
 	k8s.io/component-base v0.37.2 // indirect

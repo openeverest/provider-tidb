@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"strings"
 	"testing"
 	"time"
@@ -150,7 +151,7 @@ func TestBackupSchedulerReconcile(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		phase       corev1alpha1.InstancePhase
+		available   bool
 		schedule    corev1alpha1.InstanceBackupSchedule
 		existing    []client.Object
 		wantBackups []string
@@ -158,14 +159,14 @@ func TestBackupSchedulerReconcile(t *testing.T) {
 	}{
 		{
 			name:        "due slot creates a backup",
-			phase:       corev1alpha1.InstancePhaseReady,
+			available:   true,
 			schedule:    hourly,
 			wantBackups: []string{dueName},
 			wantRequeue: 57 * time.Minute,
 		},
 		{
 			name:        "slot already taken is not repeated",
-			phase:       corev1alpha1.InstancePhaseReady,
+			available:   true,
 			schedule:    hourly,
 			existing:    []client.Object{scheduledBackup(dueName, "hourly", 0, backupv1alpha1.BackupStateRunning)},
 			wantBackups: []string{dueName},
@@ -173,26 +174,25 @@ func TestBackupSchedulerReconcile(t *testing.T) {
 		},
 		{
 			name:        "held while the instance is not serving",
-			phase:       corev1alpha1.InstancePhaseProvisioning,
 			schedule:    hourly,
 			wantRequeue: scheduleRetryInterval,
 		},
 		{
 			name:        "held while the previous run is in progress",
-			phase:       corev1alpha1.InstancePhaseReady,
+			available:   true,
 			schedule:    hourly,
 			existing:    []client.Object{scheduledBackup("orders-hourly-202610010900", "hourly", 1, backupv1alpha1.BackupStateRunning)},
 			wantBackups: []string{"orders-hourly-202610010900"},
 			wantRequeue: scheduleRetryInterval,
 		},
 		{
-			name:     "disabled schedule does nothing",
-			phase:    corev1alpha1.InstancePhaseReady,
-			schedule: corev1alpha1.InstanceBackupSchedule{Name: "hourly", Cron: "0 * * * *"},
+			name:      "disabled schedule does nothing",
+			available: true,
+			schedule:  corev1alpha1.InstanceBackupSchedule{Name: "hourly", Cron: "0 * * * *"},
 		},
 		{
-			name: "retention prunes older backups of the schedule only",
-			phase: corev1alpha1.InstancePhaseReady,
+			name:      "retention prunes older backups of the schedule only",
+			available: true,
 			schedule: corev1alpha1.InstanceBackupSchedule{
 				Name: "hourly", Enabled: true, Cron: "0 * * * *", Retention: countRetention(1),
 			},
@@ -210,7 +210,7 @@ func TestBackupSchedulerReconcile(t *testing.T) {
 			in := testInstance("8.5.2")
 			in.Spec.ProviderRef.Name = common.ProviderName
 			in.Spec.Backup = scheduledBackupSpec(tt.schedule)
-			in.Status.Phase = tt.phase
+			setAvailable(in, tt.available)
 
 			cl := schedulerClient(t, append([]client.Object{in}, tt.existing...)...)
 			s := &BackupScheduler{client: cl, now: func() time.Time { return scheduleNow }}
@@ -240,7 +240,7 @@ func TestBackupSchedulerCreatesBackupFromSchedule(t *testing.T) {
 		Name: "hourly", Enabled: true, Cron: "0 * * * *",
 		Parameters: &runtime.RawExtension{Raw: []byte(`{"k":"v"}`)},
 	})
-	in.Status.Phase = corev1alpha1.InstancePhaseReady
+	setAvailable(in, true)
 	cl := schedulerClient(t, in)
 	s := &BackupScheduler{client: cl, now: func() time.Time { return scheduleNow }}
 	_, err := s.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Namespace: testNamespace, Name: in.Name}})
@@ -322,4 +322,15 @@ func backupNames(backups []*backupv1alpha1.Backup) []string {
 		names = append(names, b.Name)
 	}
 	return names
+}
+
+// setAvailable sets the Instance's Available condition the runtime writes.
+func setAvailable(in *corev1alpha1.Instance, available bool) {
+	status := metav1.ConditionFalse
+	if available {
+		status = metav1.ConditionTrue
+	}
+	meta.SetStatusCondition(&in.Status.Conditions, metav1.Condition{
+		Type: corev1alpha1.ConditionAvailable, Status: status, Reason: "Test",
+	})
 }

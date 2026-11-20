@@ -122,13 +122,16 @@ func TestEvaluateStatusWhileRemovingTiProxy(t *testing.T) {
 	tiproxy := convergedGroup(common.ComponentTiProxy, 2)
 	tiproxy.removing = true
 
-	got := evaluateStatus(corev1alpha1.InstancePhaseReady, []groupRollout{convergedGroup(common.ComponentPD, 3), tiproxy})
+	got := evaluateStatus([]groupRollout{convergedGroup(common.ComponentPD, 3), convergedGroup(common.ComponentTiKV, 3),
+		convergedGroup(common.ComponentTiDB, 2), tiproxy}, false)
 
-	if got.Phase != corev1alpha1.InstancePhaseUpdating || !strings.Contains(got.Message, "tiproxy (removing)") {
-		t.Fatalf("status = %s %q, want Updating while tiproxy is removed", got.Phase, got.Message)
+	if got.Converged || !strings.Contains(got.Message, "tiproxy (removing)") || got.Available != controller.Available {
+		t.Fatalf("status = %+v, want not converged and available while tiproxy is removed", got)
 	}
 }
 
+// Clients are told where to connect as soon as the SQL tier they connect to
+// serves: TiProxy while it is on, TiDB otherwise.
 func TestStatusTiDBTiProxy(t *testing.T) {
 	tiproxyGroup := func(ready int32) client.Object {
 		g := &tidbcorev1.TiProxyGroup{ObjectMeta: metav1.ObjectMeta{Name: "orders", Namespace: testNamespace}}
@@ -139,24 +142,19 @@ func TestStatusTiDBTiProxy(t *testing.T) {
 		return g
 	}
 	tests := []struct {
-		name        string
-		previous    corev1alpha1.InstancePhase
-		replicas    int32
-		group       client.Object
-		wantPhase   corev1alpha1.InstancePhase
-		wantMessage string
-		wantHost    string
+		name          string
+		replicas      int32
+		group         client.Object
+		wantConverged bool
+		wantMessage   string
+		wantHost      string
 	}{
-		{"enabled before the group exists", "", 2, nil, corev1alpha1.InstancePhaseProvisioning, "tiproxy (0/2 ready)", ""},
-		{"enabled on a ready instance before the group exists", corev1alpha1.InstancePhaseReady, 2, nil,
-			corev1alpha1.InstancePhaseUpdating, "tiproxy (0/2 ready)", ""},
-		{"enabled and starting", "", 2, tiproxyGroup(1), corev1alpha1.InstancePhaseProvisioning, "tiproxy (1/2 ready)", ""},
-		{"enabled on a ready instance and starting", corev1alpha1.InstancePhaseReady, 2, tiproxyGroup(0),
-			corev1alpha1.InstancePhaseUpdating, "tiproxy (0/2 ready)", ""},
-		{"enabled and ready", "", 2, tiproxyGroup(2), corev1alpha1.InstancePhaseReady, "", "orders-tiproxy.db"},
-		{"disabled and still running", corev1alpha1.InstancePhaseReady, 0, tiproxyGroup(2),
-			corev1alpha1.InstancePhaseUpdating, "tiproxy (removing)", ""},
-		{"disabled and gone", "", 0, nil, corev1alpha1.InstancePhaseReady, "", "orders-tidb.db"},
+		{"enabled before the group exists", 2, nil, false, "tiproxy (0/2 ready)", ""},
+		{"enabled and starting", 2, tiproxyGroup(0), false, "tiproxy (0/2 ready)", ""},
+		{"enabled with one proxy ready", 2, tiproxyGroup(1), false, "tiproxy (1/2 ready)", "orders-tiproxy.db"},
+		{"enabled and ready", 2, tiproxyGroup(2), true, "", "orders-tiproxy.db"},
+		{"disabled and still running", 0, tiproxyGroup(2), false, "tiproxy (removing)", "orders-tidb.db"},
+		{"disabled and gone", 0, nil, true, "", "orders-tidb.db"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -165,13 +163,12 @@ func TestStatusTiDBTiProxy(t *testing.T) {
 				objs = append(objs, tt.group)
 			}
 			in := withTiProxy(testInstance("8.5.2"), tt.replicas, testTiProxyVersion)
-			in.Status.Phase = tt.previous
 			c := validationContext(t, in, objs...)
 
 			got, err := StatusTiDB(c)
 			assertError(t, err, "")
-			if got.Phase != tt.wantPhase || !strings.Contains(got.Message, tt.wantMessage) {
-				t.Errorf("status = %s %q, want %s containing %q", got.Phase, got.Message, tt.wantPhase, tt.wantMessage)
+			if got.Converged != tt.wantConverged || !strings.Contains(got.Message, tt.wantMessage) {
+				t.Errorf("status = converged %v %q, want %v containing %q", got.Converged, got.Message, tt.wantConverged, tt.wantMessage)
 			}
 			if got.ConnectionDetails.Host != tt.wantHost {
 				t.Errorf("connection host = %q, want %q", got.ConnectionDetails.Host, tt.wantHost)
