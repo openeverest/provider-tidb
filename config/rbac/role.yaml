@@ -25,10 +25,9 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - events
+  - namespaces
   verbs:
-  - create
-  - patch
+  - get
 - apiGroups:
   - ""
   resources:
@@ -49,14 +48,29 @@ rules:
   - update
   - watch
 - apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
   - backup.openeverest.io
   resources:
   - backupclasses
+  - backupstorageclasses
   - backupstorages
   verbs:
   - get
   - list
   - watch
+- apiGroups:
+  - backup.openeverest.io
+  resources:
+  - backupclasses/status
+  verbs:
+  - patch
 - apiGroups:
   - backup.openeverest.io
   resources:
@@ -195,29 +209,21 @@ rules:
   - list
   - watch
 - apiGroups:
-  - monitoring.coreos.com
+  - monitoring.openeverest.io
   resources:
-  - podmonitors
+  - monitoringbindings
+  - monitoringclasses
+  - monitoringdestinations
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
-  - operator.victoriametrics.com
+  - monitoring.openeverest.io
   resources:
-  - vmpodscrapes
+  - monitoringbindings/status
   verbs:
-  - create
-  - delete
-  - get
-  - list
   - patch
-  - update
-  - watch
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:

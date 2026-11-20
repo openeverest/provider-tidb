@@ -33,6 +33,8 @@ spec:
         - apply:
             file: 10-setup.yaml
         - assert:
+            file: ../backup-storage-ready.yaml
+        - assert:
             file: 10-assert.yaml
 
     - name: create-and-complete-backup

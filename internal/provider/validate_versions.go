@@ -6,6 +6,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
+	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
@@ -17,14 +18,35 @@ import (
 // holds each component back until the ones before it run at least its version.
 var upgradeOrder = []string{common.ComponentPD, common.ComponentTiFlash, common.ComponentTiKV, common.ComponentTiDB}
 
-// validateVersions enforces TiDB's upgrade rules on the requested component
-// versions, comparing them with what the cluster already targets.
-func validateVersions(c *controller.Context) error {
-	target, err := targetVersions(c)
+// validateVersionSpec checks the requested component versions on their own:
+// each is a semantic version and none is newer than one TiDB upgrades before it.
+func validateVersionSpec(in *corev1alpha1.Instance, spec *corev1alpha1.ProviderSpec) error {
+	target, err := targetVersions(in, spec)
 	if err != nil {
 		return err
 	}
 	if err := checkUpgradeOrder(target); err != nil {
+		return err
+	}
+	to, err := tiproxyTargetVersion(in, spec)
+	if err != nil {
+		return err
+	}
+	if to != "" && !semver.IsValid(canonicalVersion(to)) {
+		return fmt.Errorf("%s version %q is not a valid semantic version", common.ComponentTiProxy, to)
+	}
+	return nil
+}
+
+// validateNoDowngrade rejects requested versions older than the ones the
+// cluster already targets, which TiDB cannot roll back to.
+func validateNoDowngrade(c *controller.Context) error {
+	spec, err := c.ProviderSpec()
+	if err != nil {
+		return err
+	}
+	target, err := targetVersions(c.Instance(), spec)
+	if err != nil {
 		return err
 	}
 	current, err := currentVersions(c)
@@ -34,29 +56,31 @@ func validateVersions(c *controller.Context) error {
 	if err := checkNoDowngrade(current, target); err != nil {
 		return err
 	}
-	return validateTiProxyVersion(c)
+	return validateTiProxyNoDowngrade(c, spec)
 }
 
-// validateTiProxyVersion checks TiProxy on its own: it has its own version line,
-// so it is neither ordered against nor compared with the TiDB components.
-func validateTiProxyVersion(c *controller.Context) error {
-	comp, ok := enabledTiProxy(c.Instance().Spec.Components)
+// tiproxyTargetVersion resolves TiProxy's requested version, or "" when it is
+// disabled or unversioned. TiProxy has its own version line, so it is neither
+// ordered against nor compared with the TiDB components.
+func tiproxyTargetVersion(in *corev1alpha1.Instance, spec *corev1alpha1.ProviderSpec) (string, error) {
+	comp, ok := enabledTiProxy(in.Spec.Components)
 	if !ok {
-		return nil
+		return "", nil
 	}
-	to := comp.Version
-	if to == "" {
-		bundle, err := versionBundleComponents(c)
-		if err != nil {
-			return err
-		}
-		to = bundle[common.ComponentTiProxy]
+	if comp.Version != "" {
+		return comp.Version, nil
 	}
-	if to == "" {
-		return nil
+	bundle, err := versionBundleComponents(in, spec)
+	if err != nil {
+		return "", err
 	}
-	if !semver.IsValid(canonicalVersion(to)) {
-		return fmt.Errorf("%s version %q is not a valid semantic version", common.ComponentTiProxy, to)
+	return bundle[common.ComponentTiProxy], nil
+}
+
+func validateTiProxyNoDowngrade(c *controller.Context, spec *corev1alpha1.ProviderSpec) error {
+	to, err := tiproxyTargetVersion(c.Instance(), spec)
+	if err != nil || to == "" || !semver.IsValid(canonicalVersion(to)) {
+		return err
 	}
 	group := &tidbcorev1.TiProxyGroup{}
 	found, err := c.Exists(group, c.Name())
@@ -76,8 +100,8 @@ func validateTiProxyVersion(c *controller.Context) error {
 // targetVersions resolves each running component's requested version: an
 // explicit component version wins, otherwise the Instance's version bundle
 // supplies it. A disabled TiFlash has no target.
-func targetVersions(c *controller.Context) (map[string]string, error) {
-	comps := c.Instance().Spec.Components
+func targetVersions(in *corev1alpha1.Instance, spec *corev1alpha1.ProviderSpec) (map[string]string, error) {
+	comps := in.Spec.Components
 	target := make(map[string]string, len(upgradeOrder))
 	var bundleVersions map[string]string
 	_, tiflashEnabled := enabledTiFlash(comps)
@@ -89,7 +113,7 @@ func targetVersions(c *controller.Context) (map[string]string, error) {
 		if version == "" {
 			if bundleVersions == nil {
 				var err error
-				if bundleVersions, err = versionBundleComponents(c); err != nil {
+				if bundleVersions, err = versionBundleComponents(in, spec); err != nil {
 					return nil, err
 				}
 			}
@@ -102,12 +126,11 @@ func targetVersions(c *controller.Context) (map[string]string, error) {
 	return target, nil
 }
 
-func versionBundleComponents(c *controller.Context) (map[string]string, error) {
-	spec, err := c.ProviderSpec()
-	if err != nil {
-		return nil, err
+func versionBundleComponents(in *corev1alpha1.Instance, spec *corev1alpha1.ProviderSpec) (map[string]string, error) {
+	if spec == nil {
+		return map[string]string{}, nil
 	}
-	name := controller.EffectiveVersionBundleName(spec, c.Instance())
+	name := controller.EffectiveVersionBundleName(spec, in)
 	if name == "" {
 		return map[string]string{}, nil
 	}

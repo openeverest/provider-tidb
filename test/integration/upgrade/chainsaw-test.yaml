@@ -179,10 +179,10 @@ spec:
               for i in $(seq 1 160); do
                 pods=$(kubectl -n $NAMESPACE get pods -l pingcap.com/cluster=test-instance \
                   -o jsonpath='{range .items[*]}{.spec.containers[0].image} {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}')
-                phase=$(kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o jsonpath='{.status.phase}')
+                ready=$(kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
                 upgraded=$(echo "$pods" | grep -c ":$image_tag True$" || true)
-                echo "phase=$phase upgraded-ready-pods=$upgraded/$(echo "$pods" | grep -c . || true)"
-                if [ "$phase" = "Ready" ] && [ "$upgraded" = "3" ] && [ "$(echo "$pods" | grep -c .)" = "3" ]; then
+                echo "ready=$ready upgraded-ready-pods=$upgraded/$(echo "$pods" | grep -c . || true)"
+                if [ "$ready" = "True" ] && [ "$upgraded" = "3" ] && [ "$(echo "$pods" | grep -c .)" = "3" ]; then
                   exit 0
                 fi
                 sleep 5

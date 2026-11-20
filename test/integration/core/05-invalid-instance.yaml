@@ -1,0 +1,25 @@
+# An even number of PD replicas can never form a quorum, so the provider's
+# admission webhook denies the Instance before it is stored.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-invalid
+spec:
+  providerRef:
+    name: tidb
+  topology:
+    type: cluster
+  components:
+    pd:
+      type: pd
+      replicas: 2
+      storage:
+        size: 10Gi
+    tikv:
+      type: tikv
+      replicas: 1
+      storage:
+        size: 20Gi
+    tidb:
+      type: tidb
+      replicas: 1

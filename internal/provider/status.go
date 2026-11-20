@@ -19,26 +19,40 @@ import (
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
-// StatusTiDB reports the Instance phase and per-component readiness from the
-// component groups, plus the reasons the operator gives for unhealthy instances.
+// Reasons of what the provider reports about clients' access.
+const (
+	reasonNoSQLServerReady = "NoSQLServerReady"
+	reasonNoPDQuorum       = "NoPDQuorum"
+	reasonNoTiKVReady      = "NoTiKVReady"
+	reasonTiKVNodesDown    = "TiKVNodesDown"
+)
+
+// reasonRollingOutVersion is the reason of the Upgrading operation.
+const reasonRollingOutVersion = "RollingOutVersion"
+
+// StatusTiDB reports what the provider observes about the TiDB cluster:
+// whether every component group runs what the Instance asks for, whether
+// clients can connect, what is wrong and which long operation is running, and
+// how many pods each component will have. The runtime derives the Instance's
+// phase and conditions from these facts.
 func StatusTiDB(c *controller.Context) (controller.Status, error) {
-	// While an initial-seeding restore (.spec.dataSource) is in flight, hold the
-	// Instance in Restoring so it only becomes Ready once the data is restored.
+	// While an initial-seeding restore (.spec.dataSource) is in flight the
+	// Instance is restoring, and only converges once the data is restored.
 	if ds := c.GetDataSourceStatus(); ds != nil && !ds.Done {
-		return controller.Restoring(ds.Message), nil
+		return withDesiredReplicas(c, controller.Restoring(ds.Message)), nil
 	}
 
 	pd := &tidbcorev1.PDGroup{}
 	if err := c.Get(pd, c.Name()); err != nil {
-		return controller.Provisioning("Waiting for PD group to be created"), nil
+		return withDesiredReplicas(c, controller.Progressing("Waiting for PD group to be created")), nil
 	}
 	tikv := &tidbcorev1.TiKVGroup{}
 	if err := c.Get(tikv, c.Name()); err != nil {
-		return controller.Provisioning("Waiting for TiKV group to be created"), nil
+		return withDesiredReplicas(c, controller.Progressing("Waiting for TiKV group to be created")), nil
 	}
 	tidb := &tidbcorev1.TiDBGroup{}
 	if err := c.Get(tidb, c.Name()); err != nil {
-		return controller.Provisioning("Waiting for TiDB group to be created"), nil
+		return withDesiredReplicas(c, controller.Progressing("Waiting for TiDB group to be created")), nil
 	}
 
 	groups := []groupRollout{
@@ -54,8 +68,7 @@ func StatusTiDB(c *controller.Context) (controller.Status, error) {
 	tiflashSpec, tiflashEnabled := enabledTiFlash(c.Instance().Spec.Components)
 	switch {
 	case tiflashEnabled && !found:
-		// Not an early Provisioning return: the cache may not show the group just
-		// applied, and Provisioning would stick on an Instance that was Ready.
+		// Not an early return: the cache may not show the group just applied.
 		groups = append(groups, groupRollout{
 			component: common.ComponentTiFlash, replicas: replicasOrDefault(tiflashSpec.Replicas, defaultTiFlashReplicas),
 		})
@@ -90,11 +103,34 @@ func StatusTiDB(c *controller.Context) (controller.Status, error) {
 		groups[i].problem = problems[groups[i].component]
 	}
 
-	status := evaluateStatus(c.Instance().Status.Phase, groups)
-	if status.Phase == corev1alpha1.InstancePhaseReady {
+	status := evaluateStatus(groups, tiproxyEnabled)
+	// Clients are told where to connect as soon as they can, not only once
+	// the cluster has converged, and the details follow a change still
+	// rolling out.
+	if status.Converged || status.Available == controller.Available {
 		status.ConnectionDetails = connectionDetails(c)
 	}
-	return status, nil
+	return withDesiredReplicas(c, status), nil
+}
+
+// withDesiredReplicas reports how many pods each component of the Instance
+// will have once the current spec has converged, with Sync's defaults.
+func withDesiredReplicas(c *controller.Context, status controller.Status) controller.Status {
+	defaults := map[string]int32{
+		common.ComponentPD:      defaultPDReplicas,
+		common.ComponentTiKV:    defaultTiKVReplicas,
+		common.ComponentTiDB:    defaultTiDBReplicas,
+		common.ComponentTiFlash: defaultTiFlashReplicas,
+		common.ComponentTiProxy: defaultTiProxyReplicas,
+	}
+	for name, spec := range c.Instance().Spec.Components {
+		def, known := defaults[name]
+		if !known {
+			continue
+		}
+		status = status.WithDesiredReplicas(name, *replicasOrDefault(spec.Replicas, def))
+	}
+	return status
 }
 
 // groupRollout pairs a component group's desired state with what the operator
@@ -114,8 +150,9 @@ type groupRollout struct {
 
 type componentProblem struct {
 	message string
-	// fatal marks a state Kubernetes does not get out of without intervention.
-	fatal bool
+	// reason names a state Kubernetes does not get out of by retrying alone,
+	// such as CrashLoopBackOff at its longest back-off; empty otherwise.
+	reason string
 }
 
 // converged mirrors the operator's IsGroupHealthyAndUpToDate minus observedGeneration,
@@ -141,6 +178,12 @@ func (g groupRollout) desired() int32 {
 	return *g.replicas
 }
 
+// upgrading reports whether the group rolls out another version than the one
+// it runs. The operator records the version once the group has rolled it out.
+func (g groupRollout) upgrading() bool {
+	return !g.removing && g.version != "" && g.groupStatus.Version != "" && g.groupStatus.Version != g.version
+}
+
 // summary reads e.g. "tikv (2/3 ready: <operator reason>)" or "tiflash (removing)".
 func (g groupRollout) summary() string {
 	counts := fmt.Sprintf("%d/%d ready", g.groupStatus.ReadyReplicas, g.desired())
@@ -160,32 +203,78 @@ func (g groupRollout) summary() string {
 	return fmt.Sprintf("%s (%s: %s)", g.component, counts, reason)
 }
 
-// evaluateStatus picks the Instance phase: Failed if a component is stuck,
-// Ready once every group converged, otherwise Provisioning on the first
-// rollout and Updating on a cluster that was already serving.
-func evaluateStatus(previous corev1alpha1.InstancePhase, groups []groupRollout) controller.Status {
-	var pending []string
-	var failure string
+// evaluateStatus turns the component groups into the facts the provider
+// reports: converged once every group runs what the Instance asks for, the
+// problems the operator reports, a version rollout, and whether clients can
+// connect. tiproxy says whether clients connect through TiProxy.
+func evaluateStatus(groups []groupRollout, tiproxy bool) controller.Status {
+	var pending, upgrading []string
+	var status controller.Status
 	for _, g := range groups {
-		if g.problem.fatal && failure == "" {
-			failure = fmt.Sprintf("%s is failing: %s", g.component, g.problem.message)
+		if g.problem.reason != "" {
+			status = status.WithProblem(g.problem.reason, fmt.Sprintf("%s is failing: %s", g.component, g.problem.message))
 		}
 		if !g.converged() {
 			pending = append(pending, g.summary())
 		}
+		if g.upgrading() {
+			upgrading = append(upgrading, fmt.Sprintf("%s to %s", g.component, g.version))
+		}
 	}
+	if len(upgrading) > 0 {
+		status = status.WithOperation(corev1alpha1.ConditionUpgrading, reasonRollingOutVersion,
+			"Rolling out "+strings.Join(upgrading, ", "))
+	}
+	if len(pending) == 0 {
+		status.Converged = true
+	} else {
+		status.Message = "Waiting for " + strings.Join(pending, ", ")
+	}
+	return withAvailability(status, groups, tiproxy)
+}
 
-	summary := strings.Join(pending, ", ")
-	switch {
-	case failure != "":
-		return controller.Failed(failure)
-	case len(pending) == 0:
-		return controller.Ready()
-	case previous == corev1alpha1.InstancePhaseReady || previous == corev1alpha1.InstancePhaseUpdating:
-		return controller.Updating("Rolling out changes to " + summary)
-	default:
-		return controller.Provisioning("Waiting for " + summary)
+// withAvailability reports whether clients can connect, from the pods of
+// each group that exist and are ready, so it stays True through a rolling
+// restart and while new nodes join: PD keeps a quorum of its members, at most
+// one TiKV node that holds data is down, and the SQL servers clients connect
+// to (TiProxy, or TiDB) have a ready pod. With more TiKV nodes down, whether
+// every Region still has a majority of its replicas depends on where PD put
+// them, so the answer is unknown.
+func withAvailability(status controller.Status, groups []groupRollout, tiproxy bool) controller.Status {
+	byComponent := map[string]groupRollout{}
+	for _, g := range groups {
+		byComponent[g.component] = g
 	}
+	sql := byComponent[common.ComponentTiDB]
+	if tiproxy {
+		sql = byComponent[common.ComponentTiProxy]
+	}
+	pd, tikv := byComponent[common.ComponentPD], byComponent[common.ComponentTiKV]
+	pdMembers, pdReady := pd.existing(), pd.groupStatus.ReadyReplicas
+	tikvNodes, tikvReady := tikv.existing(), tikv.groupStatus.ReadyReplicas
+	tikvDown := tikvNodes - tikvReady
+	switch {
+	case sql.groupStatus.ReadyReplicas == 0:
+		return status.WithUnavailable(reasonNoSQLServerReady, fmt.Sprintf("No %s pod is ready", sql.component))
+	case pdReady <= pdMembers/2:
+		return status.WithUnavailable(reasonNoPDQuorum,
+			fmt.Sprintf("PD has no quorum: %d of %d members ready", pdReady, pdMembers))
+	case tikvReady == 0:
+		return status.WithUnavailable(reasonNoTiKVReady, "No TiKV pod is ready")
+	case tikvDown > 1 || (tikvDown == 1 && tikvNodes < 3):
+		status.Available = controller.AvailabilityUnknown
+		status.AvailableReason = reasonTiKVNodesDown
+		status.AvailableMessage = fmt.Sprintf("%d of %d TiKV pods ready: some data may have no majority of its replicas",
+			tikvReady, tikvNodes)
+		return status
+	}
+	return status.WithAvailable(controller.Available)
+}
+
+// existing is the number of the group's pods that exist, as the operator
+// last counted them.
+func (g groupRollout) existing() int32 {
+	return max(g.groupStatus.Replicas, g.groupStatus.ReadyReplicas)
 }
 
 // instanceProblems reads the conditions the operator keeps on each PD, TiKV,
@@ -238,13 +327,13 @@ func instanceProblems(c *controller.Context) (map[string]componentProblem, error
 }
 
 // recordProblem keeps the first problem seen for a component, unless a later
-// instance reports a fatal one.
+// instance reports one retrying won't fix.
 func recordProblem(problems map[string]componentProblem, component, instance string, conds []metav1.Condition) {
 	problem, ok := instanceProblem(instance, conds)
 	if !ok {
 		return
 	}
-	if existing, seen := problems[component]; seen && (existing.fatal || !problem.fatal) {
+	if existing, seen := problems[component]; seen && (existing.reason != "" || problem.reason == "") {
 		return
 	}
 	problems[component] = problem
@@ -254,7 +343,7 @@ func instanceProblem(instance string, conds []metav1.Condition) (componentProble
 	if cond := meta.FindStatusCondition(conds, tidbcorev1.CondRunning); cond != nil && cond.Status == metav1.ConditionFalse {
 		return componentProblem{
 			message: fmt.Sprintf("instance %s: %s", instance, cond.Message),
-			fatal:   isStuckContainer(cond.Message),
+			reason:  stuckContainerReason(cond.Message),
 		}, true
 	}
 	if cond := meta.FindStatusCondition(conds, tidbcorev1.CondReady); cond != nil && cond.Status == metav1.ConditionFalse {
@@ -265,8 +354,8 @@ func instanceProblem(instance string, conds []metav1.Condition) (componentProble
 
 // stuckWaitingReasons are container waiting states that retrying alone does
 // not fix. CrashLoopBackOff only counts once kubelet's back-off hits its
-// ceiling, so the restarts TiDB goes through while PD/TiKV bootstrap don't
-// flag the Instance as Failed.
+// ceiling, so the restarts TiDB goes through while PD/TiKV bootstrap aren't
+// reported as a problem.
 var stuckWaitingReasons = []string{
 	"ImagePullBackOff",
 	"ErrImageNeverPull",
@@ -276,16 +365,21 @@ var stuckWaitingReasons = []string{
 
 const maxCrashLoopBackOff = "back-off 5m0s"
 
-func isStuckContainer(message string) bool {
+// stuckContainerReason returns the waiting reason of a container that is
+// stuck, as the operator words it in an instance's Running condition, or "".
+func stuckContainerReason(message string) string {
 	if strings.Contains(message, "reason: CrashLoopBackOff") {
-		return strings.Contains(message, maxCrashLoopBackOff)
+		if strings.Contains(message, maxCrashLoopBackOff) {
+			return "CrashLoopBackOff"
+		}
+		return ""
 	}
 	for _, reason := range stuckWaitingReasons {
 		if strings.Contains(message, "reason: "+reason) {
-			return true
+			return reason
 		}
 	}
-	return false
+	return ""
 }
 
 // connectionDetails points at the internal (SQL) service clients should use:

@@ -14,9 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	vmv1beta1 "github.com/VictoriaMetrics/operator/api/operator/v1beta1"
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
@@ -25,6 +23,7 @@ import (
 	tidbbrv1 "github.com/pingcap/tidb-operator/api/v2/br/v1alpha1"
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
+	"github.com/openeverest/provider-tidb/definition/backupclasses"
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
@@ -46,14 +45,12 @@ type Provider struct {
 
 // New creates a new TiDB Provider instance.
 func New() *Provider {
-	return &Provider{
+	p := &Provider{
 		BaseProvider: controller.BaseProvider{
 			ProviderName: common.ProviderName,
 			SchemeFuncs: []func(*runtime.Scheme) error{
 				tidbcorev1.Install,
 				tidbbrv1.Install,
-				monitoringv1.AddToScheme,
-				vmv1beta1.AddToScheme,
 				cmapi.AddToScheme,
 				// The ServiceAccount, Role and RoleBinding the BR jobs run as.
 				rbacv1.AddToScheme,
@@ -80,6 +77,9 @@ func New() *Provider {
 			},
 		},
 	}
+	// The runtime claims the BackupClass the chart ships and executes it.
+	p.SetShippedBackupClasses(backupclasses.Shipped())
+	return p
 }
 
 // instanceForBRBackup maps a BR Backup to the Instance of the cluster it backs up.
@@ -119,11 +119,6 @@ func instanceForCluster(_ context.Context, obj client.Object) []reconcile.Reques
 // every group after the Instance, so the group's own name is the Instance name.
 func instanceForGroup(_ context.Context, obj client.Object) []reconcile.Request {
 	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}}}
-}
-
-// Validate checks that the Instance spec is valid for TiDB.
-func (p *Provider) Validate(c *controller.Context) error {
-	return ValidateTiDB(c)
 }
 
 // Sync reconciles the Instance into the TiDB Operator v2 resources.

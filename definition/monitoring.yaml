@@ -1,0 +1,19 @@
+# Monitoring contract, published by `provider-sdk generate` as
+# Provider.spec.monitoring.
+#
+# componentTypes: what each component type from provider.yaml exposes (its
+# kind is declared in provider.yaml). Every TiDB component serves Prometheus
+# metrics itself, so no exporter is run. TiDB Operator has no operator-native
+# monitoring integration the provider renders, so there are no integrations.
+
+componentTypes:
+  pd:
+    metrics: Native
+  tikv:
+    metrics: Native
+  tidb:
+    metrics: Native
+  tiflash:
+    metrics: Native
+  tiproxy:
+    metrics: Native

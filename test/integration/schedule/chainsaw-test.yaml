@@ -31,6 +31,8 @@ spec:
       try:
         - apply:
             file: 10-setup.yaml
+        - assert:
+            file: ../backup-storage-ready.yaml
         - script:
             content: |
               set -e

@@ -69,6 +69,11 @@ func getLogBackup(t *testing.T, cl client.Client, instance string) (*tidbbrv1.Ba
 	return b, err == nil
 }
 
+// storagePath is the path the runtime gives instance's backups to storage.
+func storagePath(instance, storage string) string {
+	return "backups/" + testNamespace + "/" + instance + "/uid-" + instance + "/" + storage
+}
+
 // runningLogBackup is the log backup of instance to storage, started at start
 // and checkpointed at checkpoint.
 func runningLogBackup(instance, storage string, start, checkpoint time.Time) *tidbbrv1.Backup {
@@ -77,6 +82,7 @@ func runningLogBackup(instance, storage string, start, checkpoint time.Time) *ti
 		Annotations: map[string]string{annotationLogBackupStorage: storage},
 	}}
 	b.Spec.Mode = tidbbrv1.BackupModeLog
+	b.Spec.S3 = &tidbbrv1.S3StorageProvider{Bucket: "bucket", Prefix: logBackupDir(storagePath(instance, storage))}
 	b.Status.Phase = tidbbrv1.BackupRunning
 	b.Status.CommitTs = tsString(start)
 	b.Status.LogCheckpointTs = tsString(checkpoint)
@@ -102,6 +108,7 @@ func fullBackup(name, instance, storage string, ts time.Time) []client.Object {
 	}
 	br := &tidbbrv1.Backup{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace}}
 	br.Spec.Mode = tidbbrv1.BackupModeSnapshot
+	br.Spec.S3 = &tidbbrv1.S3StorageProvider{Bucket: "bucket", Prefix: storagePath(instance, storage) + "/" + name}
 	br.Status.Phase = tidbbrv1.BackupComplete
 	br.Status.CommitTs = tsString(ts)
 	return []client.Object{b, br}
@@ -130,7 +137,7 @@ func TestSyncLogBackupStartsOnceTheClusterIsReady(t *testing.T) {
 	if b.Spec.Mode != tidbbrv1.BackupModeLog || b.Spec.LogSubcommand != tidbbrv1.LogStartCommand {
 		t.Errorf("mode %q subcommand %q, want a started log backup", b.Spec.Mode, b.Spec.LogSubcommand)
 	}
-	if b.Spec.S3 == nil || b.Spec.S3.Bucket != "bucket" || b.Spec.S3.Prefix != "db/orders/_log" ||
+	if b.Spec.S3 == nil || b.Spec.S3.Bucket != "bucket" || b.Spec.S3.Prefix != "backups/db/orders/uid-orders/s3/_log" ||
 		b.Spec.S3.SecretName != "orders-pitr-br-s3" {
 		t.Errorf("S3 = %+v", b.Spec.S3)
 	}
@@ -198,16 +205,56 @@ func TestSyncLogBackupRemovesCredentialsOnceStopped(t *testing.T) {
 	}
 }
 
-func TestSyncLogBackupRejectsAMissingStorage(t *testing.T) {
-	backup := pitrBackupSpec("")
-	backup.Storages = append(backup.Storages, corev1alpha1.InstanceBackupStorage{
-		StorageRef: commonv1alpha1.ObjectRef{Name: "missing"},
-		PITR:       &corev1alpha1.InstanceBackupStoragePITR{Enabled: true},
-	})
-	c, _ := pitrContext(t, "orders", backup, readyGroups("orders")...)
-	err := syncLogBackup(c)
-	if bce := controller.AsBackupConfigError(err); bce == nil || bce.Reason != reasonPITRStorageInvalid {
-		t.Fatalf("syncLogBackup = %v, want a %s backup configuration error", err, reasonPITRStorageInvalid)
+// An entry the runtime holds, or that BR cannot use, starts no log backup and
+// leaves a running one alone; the runtime reports why on BackupConfigured.
+func TestSyncLogBackupHoldsAnEntryItCannotRender(t *testing.T) {
+	notAccepted := testBackupStorage("pending", `{"region":"us-east-1","endpointURL":"http://s3:9000"}`)
+	notAccepted.Status.Conditions = nil
+	gcs := testBackupStorage("gcs", `{"region":"auto","endpointURL":"https://storage.googleapis.com","implementation":"gcs"}`)
+	for _, tc := range []struct {
+		name       string
+		storage    string
+		running    bool
+		wantReason string
+	}{
+		{name: "missing", storage: "missing", wantReason: corev1alpha1.ReasonBackupStorageNotFound},
+		{name: "not accepted", storage: "pending", wantReason: corev1alpha1.ReasonBackupStorageNotAccepted},
+		{name: "gcs", storage: "gcs", wantReason: corev1alpha1.ReasonImplementationUnsupported},
+		{name: "running log backup is kept", storage: "pending", running: true, wantReason: corev1alpha1.ReasonBackupStorageNotAccepted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backup := pitrBackupSpec("")
+			backup.Storages = append(backup.Storages, corev1alpha1.InstanceBackupStorage{
+				StorageRef: commonv1alpha1.ObjectRef{Name: tc.storage},
+				PITR:       &corev1alpha1.InstanceBackupStoragePITR{Enabled: true},
+			})
+			objs := append(readyGroups("orders"), notAccepted, gcs)
+			var running *tidbbrv1.Backup
+			if tc.running {
+				running = runningLogBackup("orders", tc.storage, pitrNow, pitrNow)
+				objs = append(objs, running)
+			}
+			c, cl := pitrContext(t, "orders", backup, objs...)
+			if err := syncLogBackup(c); err != nil {
+				t.Fatalf("syncLogBackup: %v", err)
+			}
+			b, found := getLogBackup(t, cl, "orders")
+			switch {
+			case tc.running && (!found || b.Spec.S3.Prefix != running.Spec.S3.Prefix):
+				t.Errorf("log backup = %+v, want the running one kept as it was", b)
+			case !tc.running && found:
+				t.Error("log backup started on a held entry")
+			}
+			storages, err := c.BackupStorages()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, s := range storages {
+				if s.Name() == tc.storage && s.Reason != tc.wantReason {
+					t.Errorf("entry %s reason = %q, want %q", tc.storage, s.Reason, tc.wantReason)
+				}
+			}
+		})
 	}
 }
 
@@ -443,11 +490,11 @@ func TestPointInTimeRestore(t *testing.T) {
 			if br.Spec.Mode != tidbbrv1.RestoreModePiTR || br.Spec.PitrRestoredTs != tsString(tc.wantTS) {
 				t.Errorf("mode %q restored-ts %s, want pitr at %s", br.Spec.Mode, br.Spec.PitrRestoredTs, tsString(tc.wantTS))
 			}
-			if br.Spec.S3 == nil || br.Spec.S3.Prefix != "db/orders/_log" {
+			if br.Spec.S3 == nil || br.Spec.S3.Prefix != "backups/db/orders/uid-orders/s3/_log" {
 				t.Errorf("log storage = %+v", br.Spec.S3)
 			}
 			full := br.Spec.PitrFullBackupStorageProvider.S3
-			if full == nil || full.Prefix != "db/orders/"+tc.wantBase || full.Bucket != "bucket" {
+			if full == nil || full.Prefix != "backups/db/orders/uid-orders/s3/"+tc.wantBase || full.Bucket != "bucket" {
 				t.Errorf("full backup storage = %+v, want backup %s", full, tc.wantBase)
 			}
 			if br.Spec.BR == nil || br.Spec.BR.Cluster != "clone" {

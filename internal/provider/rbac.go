@@ -11,6 +11,7 @@ package provider
 // +kubebuilder:rbac:groups=core.openeverest.io,resources=providers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 // The runtime writes the connection details returned by Status() into a Secret.
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // The provider creates a bootstrap-sql ConfigMap that sets the root password.
@@ -35,7 +36,8 @@ package provider
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=pds;tikvs;tidbs;tiflashes;tiproxies,verbs=get;list;watch
 
 // Backup: OpenEverest backup resources the runtime reconciles.
-// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupclasses;backupstorageclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupclasses/status,verbs=patch
 // +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupstorages,verbs=get;list;watch
 // The backup scheduler creates Backups for schedule slots and deletes those past retention.
 // +kubebuilder:rbac:groups=backup.openeverest.io,resources=backups,verbs=get;list;watch;create;update;patch;delete
@@ -55,9 +57,12 @@ package provider
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch
 
-// Prometheus Operator PodMonitor the provider creates while monitoring is enabled.
-// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=get;list;watch;create;update;patch;delete
-// VictoriaMetrics Operator VMPodScrape the provider creates while monitoring is enabled.
-// +kubebuilder:rbac:groups=operator.victoriametrics.com,resources=vmpodscrapes,verbs=get;list;watch;create;update;patch;delete
+// The monitoring contract: the runtime reads the Instance's MonitoringBindings
+// with their destinations and classes, and the kube-system namespace for the
+// cluster identity it stamps on the published sources.
+// +kubebuilder:rbac:groups=monitoring.openeverest.io,resources=monitoringclasses;monitoringdestinations;monitoringbindings,verbs=get;list;watch
+// +kubebuilder:rbac:groups=monitoring.openeverest.io,resources=monitoringbindings/status,verbs=patch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get
+
 // cert-manager Issuers and Certificates the provider creates when tls.certManager is used.
 // +kubebuilder:rbac:groups=cert-manager.io,resources=issuers;certificates,verbs=get;list;watch;create;update;patch;delete

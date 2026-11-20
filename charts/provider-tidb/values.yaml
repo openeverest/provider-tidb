@@ -62,7 +62,7 @@ securityContext:
 service:
   # -- Service type
   type: ClusterIP
-  # -- Service port for the HTTP server (validation/health endpoints)
+  # -- Service port for the HTTP server (health endpoints)
   port: 8082
   # -- The address the metrics endpoint binds to. Use "0" to disable.
   metricsBindAddress: ":8081"
@@ -150,10 +150,11 @@ crds:
   # -- Job backoff limit for the install hook.
   backoffLimit: 3
 
-# -- Instance presets offered when creating a TiDB Instance.
+# -- Cluster-scoped presets offered when creating a TiDB Instance in any namespace.
 # Each preset must have 'name', 'enabled', and 'spec' fields; 'spec' is the full
-# InstancePresetSpec and is copied verbatim into the new Instance. Rendered as
-# InstancePreset '<shortName>-<name>'. Presets pin the default version bundle so
+# ClusterInstancePresetSpec and is copied verbatim into the new Instance. Rendered
+# as ClusterInstancePreset '<shortName>-<name>'; it must not reference namespaced
+# objects such as Secrets or backup storages. Presets pin the default version bundle so
 # the new Instance shows its version (presets_test.go keeps them in sync). CPU
 # stays in whole cores: the API serves fractions as millicores ("500m"), which
 # the UI's numeric field can't read.
@@ -280,22 +281,6 @@ presets:
           storage:
             size: 100Gi
 
-# PodMonitor the provider creates for every Instance with
-# spec.topology.parameters.monitoring.prometheus.enabled set.
-podMonitor:
-  # -- Labels added to every PodMonitor so that the Prometheus podMonitorSelector
-  # picks it up, e.g. `release: kube-prometheus-stack`. An Instance's own
-  # monitoring.prometheus.podMonitorLabels take precedence.
-  labels: {}
-
-# VMPodScrape the provider creates for every Instance with
-# spec.topology.parameters.monitoring.victoriaMetrics.enabled set.
-vmPodScrape:
-  # -- Labels added to every VMPodScrape so that a VMAgent podScrapeSelector
-  # picks it up. An Instance's own monitoring.victoriaMetrics.podScrapeLabels
-  # take precedence.
-  labels: {}
-
 # -- Additional environment variables to set on the provider container
 extraEnv: []
 # - name: MY_VAR
@@ -306,6 +291,17 @@ extraVolumeMounts: []
 
 # -- Additional volumes to add to the pod
 extraVolumes: []
+
+admission:
+  # -- PEM serving certificate for the Instance admission webhook. Left empty,
+  # the chart generates one and keeps it across upgrades.
+  certs:
+    tls.crt: ""
+    tls.key: ""
+    ca.crt: ""
+  certManager:
+    # -- Issue the serving certificate with cert-manager, which must be installed.
+    enabled: false
 
 # -- Leader election configuration
 leaderElection:

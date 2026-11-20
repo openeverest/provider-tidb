@@ -144,6 +144,8 @@ spec:
             file: 71-assert.yaml
         - apply:
             file: 72-backup-storage.yaml
+        - assert:
+            file: ../backup-storage-ready.yaml
         - patch:
             file: 72-enable-backup.yaml
         - apply:

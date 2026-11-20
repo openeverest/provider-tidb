@@ -12,7 +12,8 @@ spec:
   serviceAccount: openeverest-tidb-backup-manager
   s3:
     bucket: e2e-backups
-    (ends_with(prefix, '/test-instance/_log')): true
+    (contains(prefix, '/test-instance/')): true
+    (ends_with(prefix, '/s3-store/_log')): true
 status:
   phase: Running
   (commitTs != null): true

@@ -19,3 +19,19 @@ components:
         type: tiproxy
         parametersSchema: TiproxyParameters
 name: tidb
+
+# Component types: the kind of the software each type runs, published as
+# Provider.spec.componentTypes.<type>.kind and matched by monitoring classes:
+# TiDB and TiKV by their own names, the components that exist only inside a
+# TiDB cluster under tidb. Version catalogs stay in versions.yaml.
+componentTypes:
+    pd:
+        kind: tidb.pd
+    tikv:
+        kind: tikv
+    tidb:
+        kind: tidb
+    tiflash:
+        kind: tidb.tiflash
+    tiproxy:
+        kind: tidb.tiproxy

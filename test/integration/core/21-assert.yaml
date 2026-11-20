@@ -10,4 +10,5 @@ kind: Instance
 metadata:
   name: test-instance
 status:
-  phase: Updating
+  (conditions[?type == 'Ready'].status | [0]): "False"
+  (conditions[?type == 'Available'].status | [0]): "True"

@@ -3,8 +3,52 @@
 apiVersion: backup.openeverest.io/v1alpha1
 kind: BackupClass
 metadata:
+  annotations:
+    openeverest.io/provider-version: 0.3.0
   name: br
 spec:
+  backupStorageClasses:
+    - authModes:
+        - AccessKey
+      name: s3
+      parametersSchema:
+        openAPIV3Schema:
+          additionalProperties: false
+          properties:
+            endpointURL:
+              description: |-
+                EndpointURL is the URL of the S3 API, for example
+                https://s3.us-east-1.amazonaws.com. An http:// URL uses plain HTTP.
+              maxLength: 2048
+              pattern: ^https?://[^/?#@]+([/?#].*)?$
+              type: string
+            forcePathStyle:
+              description: |-
+                ForcePathStyle addresses the bucket in the URL path instead of the host
+                name, as most S3-compatible gateways require.
+              type: boolean
+            implementation:
+              description: |-
+                Implementation names the software serving the endpoint. Unset means
+                Amazon S3.
+              enum:
+                - aws
+                - minio
+                - ceph
+                - other
+              type: string
+            region:
+              description: Region of the bucket.
+              maxLength: 63
+              minLength: 1
+              type: string
+          required:
+            - endpointURL
+            - region
+          type: object
+      tls:
+        customCA: None
+        insecureSkipVerify: None
   description: |
     Full snapshot backups of a TiDB cluster to S3-compatible storage, and a
     continuous log backup for point-in-time recovery, taken by the TiDB
@@ -13,16 +57,22 @@ spec:
   executionMode: ProviderManaged
   parametersSchema:
     openAPIV3Schema:
+      description: |-
+        BrBackupParameters describes per-backup parameters (spec.parameters). A full
+        snapshot needs no extra input for now.
       type: object
   providerManaged:
     limits:
       maxPITREnabledStorages: 1
+    providerRef:
+      name: tidb
     supportsPITR: true
   restoreParametersSchema:
     openAPIV3Schema:
+      description: |-
+        BrRestoreParameters describes per-restore parameters (spec.parameters).
+        Restore is implemented separately; kept for forward compatibility.
       type: object
-  supportedProviders:
-    - tidb
   uiSchema:
     backup:
       components: {}

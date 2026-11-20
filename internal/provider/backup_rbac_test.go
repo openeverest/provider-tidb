@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,24 +39,44 @@ func brContext(t *testing.T, objs ...client.Object) (*controller.Context, client
 	}
 	base := []client.Object{
 		testCluster(),
-		&backupv1alpha1.BackupStorage{
-			ObjectMeta: metav1.ObjectMeta{Name: "s3", Namespace: testNamespace},
-			Spec: backupv1alpha1.BackupStorageSpec{
-				Type: "s3",
-				S3: &backupv1alpha1.BackupStorageS3Spec{
-					Bucket: "bucket", Region: "us-east-1", EndpointURL: "http://s3:9000",
-					CredentialsSecretRef: commonv1alpha1.SecretRef{Name: "s3-creds"},
-				},
-			},
-		},
+		testBackupStorage("s3", `{"region":"us-east-1","endpointURL":"http://s3:9000"}`),
 		&corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "s3-creds", Namespace: testNamespace},
 			Data:       map[string][]byte{"AWS_ACCESS_KEY_ID": []byte("id"), "AWS_SECRET_ACCESS_KEY": []byte("key")},
 		},
 	}
 	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(base, objs...)...).Build()
-	return controller.NewContext(context.Background(), cl, testInstance("8.5.2"), common.ProviderName), cl
+	in := testInstance("8.5.2")
+	in.UID = "uid-orders"
+	return controller.NewContext(context.Background(), cl, in, common.ProviderName), cl
 }
+
+// testBackupStorage is an s3 BackupStorage core has accepted, with the
+// given parameters, keeping its credentials in the Secret s3-creds.
+func testBackupStorage(name, parameters string) *backupv1alpha1.BackupStorage {
+	bs := &backupv1alpha1.BackupStorage{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Spec: backupv1alpha1.BackupStorageSpec{
+			BackupStorageClassRef: commonv1alpha1.ObjectRef{Name: "s3"},
+			Location: backupv1alpha1.BackupStorageLocation{
+				ObjectStore: &backupv1alpha1.ObjectStoreLocation{Bucket: "bucket"},
+			},
+			Parameters: &runtime.RawExtension{Raw: []byte(parameters)},
+			Authentication: commonv1alpha1.Authentication{
+				Mode:                 "AccessKey",
+				CredentialsSecretRef: &commonv1alpha1.SecretRef{Name: "s3-creds"},
+			},
+		},
+	}
+	meta.SetStatusCondition(&bs.Status.Conditions, metav1.Condition{
+		Type: backupv1alpha1.BackupStorageConditionAccepted, Status: metav1.ConditionTrue, Reason: "Accepted",
+	})
+	return bs
+}
+
+// testBackupPath is the path the runtime records for the Instance's backups
+// to the storage s3.
+const testBackupPath = "backups/" + testNamespace + "/orders/uid-orders/s3"
 
 func testBackup(state backupv1alpha1.BackupState) *backupv1alpha1.Backup {
 	backup := &backupv1alpha1.Backup{
@@ -67,6 +88,7 @@ func testBackup(state backupv1alpha1.BackupState) *backupv1alpha1.Backup {
 		},
 	}
 	backup.Status.State = state
+	backup.Status.Path = testBackupPath
 	return backup
 }
 

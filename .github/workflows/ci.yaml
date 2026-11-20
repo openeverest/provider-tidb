@@ -152,6 +152,11 @@ jobs:
 
   test-integration-upgrade:
     name: Integration / upgrade
+    # The latest release (0.2.x) can't be installed on core with backup
+    # storage classes: its BackupClass has no spec.backupStorageClasses, which
+    # the CRD requires. OpenEverest v2 previews are fresh installs; turn this
+    # back on once a release built for v2.0.0-alpha.1 exists.
+    if: false
     needs: [lint, build, verify]
     uses: ./.github/workflows/integration-test.yaml
     with:

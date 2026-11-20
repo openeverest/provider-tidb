@@ -1,8 +1,9 @@
 ---
-# Core lifecycle suite: create an Instance, verify the provider produces the
-# TiDB Operator v2 CRs, simulate the operator marking the groups ready, verify
-# the Instance reports Ready, exercise the update paths (scale, CPU/memory,
-# version bundle, TiFlash, storage), then delete.
+# Core lifecycle suite: check the admission webhook denies an invalid
+# Instance, create an Instance, verify the provider produces the TiDB Operator
+# v2 CRs, simulate the operator marking the groups ready, verify the Instance
+# reports Ready, exercise the update paths (scale, CPU/memory, version bundle,
+# TiFlash, storage), then delete.
 #
 # The TiDB operator itself is NOT deployed here — the provider is exercised in
 # isolation and group readiness is simulated by patching group status.
@@ -18,7 +19,7 @@ spec:
     - script:
         content: kubectl -n $NAMESPACE get instances.core.openeverest.io test-instance -o yaml
     - script:
-        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,tiflashgroup,podmonitor,vmpodscrape -o yaml
+        content: kubectl -n $NAMESPACE get cluster,pdgroup,tikvgroup,tidbgroup,tiflashgroup -o yaml
     - podLogs:
         namespace: provider-system
         selector: app.kubernetes.io/name=provider-tidb
@@ -29,6 +30,16 @@ spec:
       try:
         - assert:
             file: 00-assert.yaml
+
+    - name: invalid-instance-rejected
+      try:
+        - script:
+            content: kubectl apply -n $NAMESPACE -f 05-invalid-instance.yaml
+            check:
+              ($error != null): true
+              (contains($stderr, 'spec.components[pd].replicas')): true
+        - error:
+            file: 05-error.yaml
 
     - name: create-instance
       try:
@@ -180,23 +191,10 @@ spec:
         - assert:
             file: 11-assert.yaml
 
-    - name: enable-monitoring
+    - name: monitoring-sources
       try:
-        - patch:
-            file: 23-enable-monitoring.yaml
         - assert:
             file: 23-assert.yaml
-        - assert:
-            file: 11-assert.yaml
-
-    - name: disable-monitoring
-      try:
-        - patch:
-            file: 24-disable-monitoring.yaml
-        - error:
-            file: 24-error.yaml
-        - assert:
-            file: 11-assert.yaml
 
     - name: changing-tls-rejected
       try:

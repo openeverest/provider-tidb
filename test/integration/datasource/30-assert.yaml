@@ -1,4 +1,4 @@
-# The clone's cluster is created and, while seeding, the Instance reports Restoring.
+# The clone's cluster is created and, while seeding, the Instance reports the Restoring operation.
 apiVersion: core.pingcap.com/v1alpha1
 kind: Cluster
 metadata:
@@ -9,4 +9,4 @@ kind: Instance
 metadata:
   name: clone
 status:
-  phase: Restoring
+  (conditions[?type == 'Restoring'].status | [0]): "True"

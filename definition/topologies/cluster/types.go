@@ -7,8 +7,6 @@ package cluster
 // distributed TiDB cluster. Per-component settings are expressed through
 // component specs.
 type ClusterTopologyParameters struct {
-	// Monitoring configures metrics collection.
-	Monitoring *Monitoring `json:"monitoring,omitempty"`
 	// TLS configures encryption. Both settings are chosen when the Instance is
 	// created and cannot be changed afterwards.
 	TLS *TLS `json:"tls,omitempty"`
@@ -47,38 +45,4 @@ type IssuerRef struct {
 	Name string `json:"name,omitempty"`
 	// Kind is Issuer (default) or ClusterIssuer.
 	Kind string `json:"kind,omitempty"`
-}
-
-// Monitoring configures metrics collection for the instance.
-type Monitoring struct {
-	// Prometheus configures scraping by the Prometheus Operator.
-	Prometheus *Prometheus `json:"prometheus,omitempty"`
-	// VictoriaMetrics configures scraping by the VictoriaMetrics Operator.
-	VictoriaMetrics *VictoriaMetrics `json:"victoriaMetrics,omitempty"`
-}
-
-// Prometheus configures the PodMonitor that scrapes PD, TiKV, TiDB, TiFlash and
-// TiProxy.
-type Prometheus struct {
-	// Enabled creates the PodMonitor; disabling it removes the PodMonitor.
-	Enabled bool `json:"enabled,omitempty"`
-	// Interval between scrapes, e.g. 30s. Defaults to the Prometheus global
-	// scrape interval.
-	Interval string `json:"interval,omitempty"`
-	// PodMonitorLabels are added to the PodMonitor so that the Prometheus
-	// podMonitorSelector picks it up (e.g. release: kube-prometheus-stack).
-	PodMonitorLabels map[string]string `json:"podMonitorLabels,omitempty"`
-}
-
-// VictoriaMetrics configures the VMPodScrape that scrapes PD, TiKV, TiDB,
-// TiFlash and TiProxy.
-type VictoriaMetrics struct {
-	// Enabled creates the VMPodScrape; disabling it removes the VMPodScrape.
-	Enabled bool `json:"enabled,omitempty"`
-	// Interval between scrapes, e.g. 30s. Defaults to the VMAgent's global
-	// scrape interval.
-	Interval string `json:"interval,omitempty"`
-	// PodScrapeLabels are added to the VMPodScrape so that a VMAgent's
-	// podScrapeSelector picks it up.
-	PodScrapeLabels map[string]string `json:"podScrapeLabels,omitempty"`
 }

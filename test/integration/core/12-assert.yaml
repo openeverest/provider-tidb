@@ -1,7 +1,8 @@
-# A cluster that was Ready reports Updating while a change rolls out.
+# While a change rolls out the Instance is not Ready, and clients can still connect.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
   name: test-instance
 status:
-  phase: Updating
+  (conditions[?type == 'Ready'].status | [0]): "False"
+  (conditions[?type == 'Available'].status | [0]): "True"

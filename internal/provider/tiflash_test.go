@@ -8,6 +8,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
+	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
@@ -50,10 +51,11 @@ func TestEvaluateStatusWhileRemovingTiFlash(t *testing.T) {
 	tiflash := convergedGroup(common.ComponentTiFlash, 2)
 	tiflash.removing = true
 
-	got := evaluateStatus(corev1alpha1.InstancePhaseReady, []groupRollout{convergedGroup(common.ComponentPD, 3), tiflash})
+	got := evaluateStatus([]groupRollout{convergedGroup(common.ComponentPD, 3), convergedGroup(common.ComponentTiKV, 3),
+		convergedGroup(common.ComponentTiDB, 2), tiflash}, false)
 
-	if got.Phase != corev1alpha1.InstancePhaseUpdating || !strings.Contains(got.Message, "tiflash (removing)") {
-		t.Fatalf("status = %s %q, want Updating while tiflash is removed", got.Phase, got.Message)
+	if got.Converged || !strings.Contains(got.Message, "tiflash (removing)") || got.Available != controller.Available {
+		t.Fatalf("status = %+v, want not converged and available while tiflash is removed", got)
 	}
 }
 
@@ -66,20 +68,17 @@ func TestStatusTiDBTiFlash(t *testing.T) {
 		return g
 	}
 	tests := []struct {
-		name        string
-		previous    corev1alpha1.InstancePhase
-		replicas    int32
-		group       client.Object
-		wantPhase   corev1alpha1.InstancePhase
-		wantMessage string
+		name          string
+		replicas      int32
+		group         client.Object
+		wantConverged bool
+		wantMessage   string
 	}{
-		{"enabled before the group exists", "", 1, nil, corev1alpha1.InstancePhaseProvisioning, "tiflash (0/1 ready)"},
-		{"enabled on a ready instance before the group exists", corev1alpha1.InstancePhaseReady, 1, nil, corev1alpha1.InstancePhaseUpdating, "tiflash (0/1 ready)"},
-		{"enabled and starting", "", 1, tiflashGroup(0), corev1alpha1.InstancePhaseProvisioning, "tiflash (0/1 ready)"},
-		{"enabled on a ready instance and starting", corev1alpha1.InstancePhaseReady, 1, tiflashGroup(0), corev1alpha1.InstancePhaseUpdating, "tiflash (0/1 ready)"},
-		{"enabled and ready", "", 1, tiflashGroup(1), corev1alpha1.InstancePhaseReady, ""},
-		{"disabled and still running", "", 0, tiflashGroup(1), corev1alpha1.InstancePhaseProvisioning, "tiflash (removing)"},
-		{"disabled and gone", "", 0, nil, corev1alpha1.InstancePhaseReady, ""},
+		{"enabled before the group exists", 1, nil, false, "tiflash (0/1 ready)"},
+		{"enabled and starting", 1, tiflashGroup(0), false, "tiflash (0/1 ready)"},
+		{"enabled and ready", 1, tiflashGroup(1), true, ""},
+		{"disabled and still running", 0, tiflashGroup(1), false, "tiflash (removing)"},
+		{"disabled and gone", 0, nil, true, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,13 +87,16 @@ func TestStatusTiDBTiFlash(t *testing.T) {
 				objs = append(objs, tt.group)
 			}
 			in := withTiFlash(testInstance("8.5.2"), tt.replicas, "")
-			in.Status.Phase = tt.previous
 			c := validationContext(t, in, objs...)
 
 			got, err := StatusTiDB(c)
 			assertError(t, err, "")
-			if got.Phase != tt.wantPhase || !strings.Contains(got.Message, tt.wantMessage) {
-				t.Errorf("status = %s %q, want %s containing %q", got.Phase, got.Message, tt.wantPhase, tt.wantMessage)
+			if got.Converged != tt.wantConverged || !strings.Contains(got.Message, tt.wantMessage) {
+				t.Errorf("status = converged %v %q, want %v containing %q", got.Converged, got.Message, tt.wantConverged, tt.wantMessage)
+			}
+			// TiFlash serves analytics only: clients connect while it starts.
+			if got.Available != controller.Available {
+				t.Errorf("available = %q, want True", got.Available)
 			}
 		})
 	}
@@ -115,7 +117,7 @@ func TestValidateTiDBTiFlashVersion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := validationContext(t, withTiFlash(testInstance("8.5.2"), tt.replicas, tt.version), testProvider())
-			assertError(t, ValidateTiDB(c), tt.wantErr)
+			assertError(t, validateAll(c), tt.wantErr)
 		})
 	}
 }

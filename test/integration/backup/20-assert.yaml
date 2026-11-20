@@ -16,6 +16,9 @@ spec:
     region: us-east-1
     endpoint: http://minio.storage:9000
     secretName: test-backup-br-s3
+    # A folder per backup under the Instance's path in the storage.
+    (starts_with(prefix, join('/', ['backups', $namespace, 'bkp', '']))): true
+    (ends_with(prefix, '/s3-store/test-backup')): true
 ---
 apiVersion: v1
 kind: Secret

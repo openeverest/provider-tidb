@@ -57,17 +57,20 @@ work is delegated to the operator.
 
 | provider-tidb | OpenEverest | TiDB Operator | Kubernetes |
 |---|---|---|---|
-| `0.2.x` | `>= 2.0.0` | `v2.0.1` | `1.30` – `1.36` |
-| `0.1.x` | `>= 2.0.0` | `v2.0.1` | `1.30` – `1.36` |
+| `0.3.x` | `2.0.0-alpha.1` | `v2.0.1` | `1.32` – `1.36` |
+| `0.2.x` | `2.0.0-dev.4` and earlier previews | `v2.0.1` | `1.30` – `1.36` |
+| `0.1.x` | `2.0.0-dev.4` and earlier previews | `v2.0.1` | `1.30` – `1.36` |
+
+SemVer ranks `2.0.0-dev.*` above `2.0.0-alpha.1`, so the rows name exact OpenEverest versions
+rather than ranges.
 
 Optional integrations, needed only for the features that use them:
 
 | Feature | Requires | Tested with |
 |---|---|---|
-| [Monitoring](#monitoring) → Prometheus | Prometheus Operator (`PodMonitor`, `monitoring.coreos.com/v1`) | kube-prometheus-stack |
-| [Monitoring](#monitoring) → VictoriaMetrics | VictoriaMetrics Operator (`VMPodScrape`, `operator.victoriametrics.com/v1beta1`) | `v0.54.1` |
+| [Monitoring](#monitoring) | A monitoring extension, e.g. [monitoring-victoriametrics](https://github.com/openeverest/monitoring-victoriametrics) or [monitoring-prometheus](https://github.com/openeverest/monitoring-prometheus) | monitoring-victoriametrics |
 | [Certificates from cert-manager](#certificates-from-cert-manager) | cert-manager | `v1.20.2` |
-| [Backups and restores](#capabilities) | S3-compatible object storage | AWS S3 API, SeaweedFS, Linode Object Storage |
+| [Backups and restores](#backup-storages) | S3-compatible object storage, as an `s3` `BackupStorage` | AWS S3 API, SeaweedFS, Linode Object Storage |
 
 The bundled operator manages TiDB engine versions independently (see [Versions](#versions)).
 
@@ -84,7 +87,7 @@ is covered under [Installation](#installation).
 | Custom configuration | ✅ | Inline TOML `config` per component |
 | Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
 | Version upgrades | ✅ | Change the version bundle; the operator rolls PD → TiFlash → TiKV → TiDB. TiProxy has its own version line. Downgrades are rejected |
-| Monitoring | ✅ | Prometheus `PodMonitor` or VictoriaMetrics `VMPodScrape` for PD, TiKV, TiDB, TiFlash and TiProxy (see [Monitoring](#monitoring)) |
+| Monitoring | ✅ | Metrics of PD, TiKV, TiDB, TiFlash and TiProxy sent to the `MonitoringDestination`s in `spec.monitoring.destinations` (see [Monitoring](#monitoring)) |
 | TLS | ✅ | mTLS between components and TLS for MySQL clients, with provider-issued certificates (see [Security](#security)) |
 | Connection proxy | ✅ | Optional TiProxy: session balancing and connections that survive TiDB restarts and scaling (see [TiProxy](#tiproxy)) |
 
@@ -106,13 +109,14 @@ See [ROADMAP.md](ROADMAP.md) for the planned work.
 > works if their StorageClass sets `allowVolumeExpansion: true`
 > (`kubectl get storageclass <name> -o jsonpath='{.allowVolumeExpansion}'`). On a StorageClass
 > without it — e.g. the k3s/kind `local-path` default — the TiDB Operator leaves the volumes at their
-> old size. Volumes can never be shrunk; `Validate` rejects a smaller size.
+> old size. Volumes can never be shrunk; the provider holds back a smaller size (see
+> [Validation](#validation)).
 
 > [!IMPORTANT]
 > Scaling **TiKV** in takes the removed nodes offline first: the operator evicts their
 > leaders and PD moves their regions to the remaining nodes before the pods are deleted. PD keeps
 > `max-replicas` copies of every region (3 by default) and refuses to remove a node once fewer than
-> that would remain, so `Validate` rejects such a scale-in instead of leaving it stuck. The limit is
+> that would remain, so the provider holds back such a scale-in instead of leaving it stuck. The limit is
 > read from `[replication] max-replicas` in the PD `config` (as the `tidb-dev` preset sets it); PD
 > only applies that setting when the cluster is created. Creating or scaling out a smaller cluster
 > is still allowed.
@@ -126,7 +130,7 @@ See [ROADMAP.md](ROADMAP.md) for the planned work.
 > `ALTER TABLE ... SET TIFLASH REPLICA 0` on those tables before scaling TiFlash in or turning it off.
 > PD also refuses to remove a store if fewer stores than its `max-replicas` (3 by default) would be
 > left, so a cluster with fewer TiKV nodes than that can't turn TiFlash off.
-> The Instance reports `Updating` with `tiflash (removing)` until the nodes are gone.
+> The Instance's `Ready` condition is `False` with `tiflash (removing)` until the nodes are gone.
 >
 > Once a table has TiFlash replicas, the optimizer may read it from TiFlash in *any* session,
 > including parts of OLTP transactions. If TiFlash is busy with analytical queries, those
@@ -148,7 +152,7 @@ See [ROADMAP.md](ROADMAP.md) for the planned work.
 > TiDB Operator v2 has no controller for `BackupSchedule`, so the provider runs
 > `spec.backup.storages[].schedules` itself: each cron slot creates a `Backup` (with
 > `spec.scheduleName`) that runs like an on-demand one. A slot fires only while the Instance is
-> `Ready` or `Updating` and no earlier run of the same schedule is in progress, and is skipped if
+> `Available` and no earlier run of the same schedule is in progress, and is skipped if
 > it can't start within 10 minutes. Retention is anchored on successful backups: `count: N` keeps
 > the N newest successful backups, and `time` keeps everything inside the window plus the newest
 > successful backup. Pruned backups follow their own `deletionPolicy`. An invalid cron expression
@@ -174,6 +178,11 @@ The chart is self-contained:
   release before the operator and provider start. This requires cluster egress to that URL; point
   `--set crds.url=...` at a mirror for air-gapped clusters, or `--set crds.install=false` to manage
   the CRDs yourself.
+- **It registers an admission webhook**, so an invalid `Instance` is rejected when it is written,
+  by `kubectl`, GitOps or the API, with every error and its field path; see
+  [Validation](#validation). The chart generates the webhook's serving certificate and keeps it
+  across upgrades; set `admission.certManager.enabled=true` to have cert-manager issue it, or
+  supply one through `admission.certs`.
 
 Upgrade and uninstall:
 
@@ -186,14 +195,37 @@ helm uninstall provider-tidb --namespace everest-system
 Uninstalling the chart does **not** delete running `Instance` resources, the TiDB CRDs, or any
 data.
 
+### Upgrading from 0.2.x
+
+0.3.x is built for OpenEverest `2.0.0-alpha.1`, which has no conversion from the developer
+previews: install both on a fresh cluster. The changes, for reference:
+
+- **Breaking:** the **Monitoring** toggles (`spec.topology.parameters.monitoring`) and the
+  chart's `podMonitor.labels` and `vmPodScrape.labels` are gone, and the provider no longer
+  creates `PodMonitor`s or `VMPodScrape`s. List a `MonitoringDestination` in
+  `spec.monitoring.destinations` instead (see [Monitoring](#monitoring)). The scrape objects an
+  Instance already has (`<instance>-metrics`, `<instance>-vm-metrics`) are left in place until
+  the Instance is deleted; delete them by hand once a destination scrapes the Instance, or the
+  Instance is scraped twice.
+- The chart grants the provider read access to the monitoring classes, destinations and
+  bindings and to namespaces, and drops its `PodMonitor` and `VMPodScrape` permissions.
+- **Breaking:** `BackupStorage`s use core's backup storage classes (`backupStorageClassRef`,
+  `location`, `parameters`, `authentication`, `tls`; see [Backup storages](#backup-storages)).
+  New backups and the point-in-time recovery log move to a path per Instance. A backup taken
+  before the upgrade keeps the folder its BR backup wrote to, and restores read it from there;
+  the log backup starts a new stream, so take a full backup after the upgrade.
+- The `br` BackupClass names the provider in `providerManaged.providerRef` and declares the `s3`
+  storage class it writes to. The provider claims it, so the chart grants it `patch` on
+  `backupclasses/status` and read access to `backupstorageclasses`.
+
 ### Upgrading from 0.1.x
 
 - Existing Instances are left as they are: the provider does not restart their pods or change
   their TiDB resources, and they stay plaintext. TLS ([Security](#security)) can only be chosen
   when an Instance is created; new Instances get it by default in the UI.
 - The chart grants the provider new permissions: ServiceAccounts, Roles and RoleBindings (for the
-  account BR jobs run as), `PodMonitor`s, `VMPodScrape`s and cert-manager `Issuer`s and
-  `Certificate`s. `helm upgrade --reuse-values` works.
+  account BR jobs run as) and cert-manager `Issuer`s and `Certificate`s.
+  `helm upgrade --reuse-values` works.
 - BR backup and restore jobs could not start in 0.1.x
   ([#63](https://github.com/openeverest/provider-tidb/issues/63)). A `Backup` or `Restore` still
   `Running` from before the upgrade keeps waiting for a job that cannot start; delete it and
@@ -282,6 +314,45 @@ therefore has the source's root password; change it with `ALTER USER` and update
 source Instance's current root password is used, and if that Instance is gone the Restore's message
 says the password is unknown.
 
+### Backup storages
+
+The `br` BackupClass writes to `BackupStorage`s of the built-in `s3` class, with `AccessKey`
+authentication. Create the credentials Secret first, then the storage:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata: {name: my-s3-credentials}
+stringData:
+  AWS_ACCESS_KEY_ID: <key id>
+  AWS_SECRET_ACCESS_KEY: <secret>
+---
+apiVersion: backup.openeverest.io/v1alpha1
+kind: BackupStorage
+metadata: {name: my-s3}
+spec:
+  backupStorageClassRef: {name: s3}
+  location: {objectStore: {bucket: my-backups, prefix: team-a}}
+  parameters:
+    region: us-east-1
+    endpointURL: https://s3.us-east-1.amazonaws.com
+    implementation: aws       # minio, ceph or other for S3-compatible stores
+  authentication:
+    mode: AccessKey
+    credentialsSecretRef: {name: my-s3-credentials}
+```
+
+- Each Instance writes under its own path in the bucket,
+  `<prefix>/backups/<namespace>/<instance>/<uid>/<storage>`: a folder per full backup, named after
+  the `Backup`, and `_log` for the [point-in-time recovery](#point-in-time-recovery) log. Every
+  `Backup` records the path in `status.path`, so a restore finds it after the source Instance is
+  gone.
+- BR is told the store is Amazon S3 only for `implementation: aws` (or unset) at an
+  `amazonaws.com` endpoint; anything else is an S3-compatible store, whose region BR doesn't check.
+- Not supported, and reported as incompatible by core: `implementation: gcs` (BR can't reach GCS
+  through its S3 client), and `spec.tls` (a BR job trusts the system CA store only, and can't skip
+  verification). Serve the store with a publicly trusted certificate, or over `http://`.
+
 ### Point-in-time recovery
 
 Enable it on one storage of the Instance (TiDB runs one log backup per cluster):
@@ -298,7 +369,7 @@ spec:
 
 Once the cluster is ready the provider starts a BR log backup (`backupMode: log`), the
 `backups.br.pingcap.com` resource `<instance>-pitr`, that keeps running and writes TiKV's change
-log to `<namespace>/<instance>/_log` in the bucket. A point-in-time restore starts from a full
+log to `_log` under the Instance's path in the storage (see [Backup storages](#backup-storages)). A point-in-time restore starts from a full
 backup taken *after* the log backup started, so take one (on demand or from a schedule) to the same
 storage. `status.backup.storages[].pitr` on the Instance then reports the restorable window and the
 health of the log backup:
@@ -353,9 +424,29 @@ reaches it. The clone gets the root password recorded with that full backup.
 > yields two `TiDB` resources (`kubectl get tidb`) and two pods, all belonging to one `TiDBGroup`
 > (`kubectl get tidbgroup`). This mirrors how a Deployment owns its Pods.
 
+### Status
+
+The provider reports facts about the TiDB cluster; OpenEverest derives the Instance's phase
+(`Pending`, `Provisioned`, `Terminating`) and conditions from them:
+
+- **`Ready`** once every component group runs the replicas and version asked for. Until then its
+  message lists what is waited for, e.g. `tikv (2/3 ready: <operator reason>)`.
+- **`Available`** while clients can connect: the SQL tier they connect to (TiProxy when it's on,
+  otherwise TiDB) has a ready pod, PD has a quorum of its members and at most one TiKV node that
+  holds data is down, so it stays `True` through a rolling restart and while new nodes join. With more TiKV nodes down it is `Unknown`: whether every Region
+  keeps a majority of its replicas depends on where PD placed them. The connection Secret is
+  published as soon as the Instance is available.
+- **Problems**: a pod stuck in `CrashLoopBackOff` (at kubelet's longest back-off),
+  `ImagePullBackOff`, `ErrImageNeverPull`, `InvalidImageName` or `CreateContainerConfigError`,
+  named by that reason.
+- **Operations**: `Restoring` while a new Instance is seeded from `spec.dataSource`, `Upgrading`
+  while a group rolls out a new version.
+- **Desired replicas** per component, so clients show e.g. `2/3` while one pod restarts.
+
 ### Presets
 
-The chart ships `InstancePreset`s, so the UI can create a working cluster in one click:
+The chart ships cluster-scoped `ClusterInstancePreset`s, so the UI can create a working cluster in
+one click in any namespace:
 
 | Preset | PD | TiKV | TiDB | TiFlash | TiProxy | Use it for |
 |---|---|---|---|---|---|---|
@@ -366,10 +457,9 @@ The chart ships `InstancePreset`s, so the UI can create a working cluster in one
 `tidb-dev` has no redundancy and sets PD's `max-replicas` to `1`, so PD stops trying to place
 three copies of the data on its single TiKV node. To try TiFlash on it, add a `tiflash`
 component with at least 4 GiB of memory; TiFlash is killed for running out of memory at 3 GiB.
-Presets pin the default version bundle; a unit test fails if they fall behind it. Sizes and the
-list itself
-live under `presets:` in [values.yaml](charts/provider-tidb/values.yaml); set `enabled: false`
-to hide one.
+Presets pin the default version bundle; a unit test fails if they fall behind it. They reference
+no namespaced objects, such as Secrets or backup storages. Sizes and the list itself live under
+`presets:` in [values.yaml](charts/provider-tidb/values.yaml); set `enabled: false` to hide one.
 
 ### TiProxy
 
@@ -396,7 +486,7 @@ spec:
 ```
 
 Setting the replica count to `0` (or removing the component) deletes the TiProxy nodes; the
-Instance reports `Updating` with `tiproxy (removing)` until they are gone.
+Instance's `Ready` condition is `False` with `tiproxy (removing)` until they are gone.
 
 > [!IMPORTANT]
 > **Turning TiProxy on or off changes the connection endpoint.** While TiProxy runs, the
@@ -431,7 +521,7 @@ lets feature gates change on a `Cluster` that already has `FeatureModification` 
   carries it, the provider turns on `SessionTokenSigning`, and the operator **replaces the TiDB
   pods one at a time** (a new pod starts before an old one stops). TiProxy balances connections
   from the start, but sessions on the TiDB pods that predate the signing certificate cannot be
-  migrated, so this one roll closes them. Expect the Instance to be `Updating` until it is done.
+  migrated, so this one roll closes them. Expect the Instance not to be `Ready`, while it stays `Available`, until it is done.
 
 The gates and the signing certificate stay when TiProxy is turned off, so turning it on again
 does not restart TiDB.
@@ -453,51 +543,42 @@ roll. Like the gates, it stays when TiProxy is turned off.
 
 ### Monitoring
 
-PD, TiKV, TiDB, TiFlash and TiProxy serve Prometheus metrics natively, so no exporter is needed.
-The **Monitoring** section of the UI (`spec.topology.parameters.monitoring`) has a toggle per
-monitoring system; each makes the provider create one scrape object for every component's
-metrics endpoint (`/metrics`, and `/api/metrics` on TiProxy's API port):
-
-| Toggle | Creates | Requires |
-|---|---|---|
-| **Prometheus** (`monitoring.prometheus`) | `PodMonitor` `<instance>-metrics` | [Prometheus Operator](https://prometheus-operator.dev/) |
-| **VictoriaMetrics** (`monitoring.victoriaMetrics`) | `VMPodScrape` `<instance>-vm-metrics` | [VictoriaMetrics Operator](https://docs.victoriametrics.com/operator/) |
+Monitoring is configured through `MonitoringDestination`s: each entry of
+`spec.monitoring.destinations` sends the instance's metrics to one destination.
 
 ```yaml
 spec:
-  topology:
-    type: cluster
-    parameters:
-      monitoring:
-        prometheus:
-          enabled: true
-          interval: 30s                       # optional; defaults to the global scrape interval
-          podMonitorLabels:                   # optional; see below
-            release: kube-prometheus-stack
-        victoriaMetrics:
-          enabled: true
-          interval: 30s                       # optional
-          podScrapeLabels: {}                 # optional; see below
+  monitoring:
+    destinations:
+      - name: metrics
+        destinationRef:
+          name: victoriametrics
 ```
 
-Both objects are owned by the Instance and removed when their toggle is turned off. They carry
-the `app.kubernetes.io/managed-by: everest` and `app.kubernetes.io/instance: <instance>` labels
-the [Metrics plugin](https://github.com/openeverest/plugin-metrics) finds a `PodMonitor` by, so its
-*Metrics* tab shows the built-in TiDB dashboard for Prometheus. Validation rejects turning a
-toggle on while its CRD is not installed.
+The provider declares its monitoring contract in
+[definition/monitoring.yaml](definition/monitoring.yaml): PD, TiKV, TiDB, TiFlash and TiProxy
+serve Prometheus metrics natively, so no exporter is run and there is no operator-native
+integration such as PMM. The provider publishes one endpoint per metrics port of every component
+that has a ready pod in `status.monitoring.sources`, whether or not a destination is listed:
 
-A monitoring system only scrapes the objects its selector matches. kube-prometheus-stack, for
-example, selects `PodMonitor`s labelled `release: <its release name>`; a `VMAgent` with
-`selectAllByDefault: true` takes every `VMPodScrape`. Set the labels once
-for every Instance with the chart's `podMonitor.labels` / `vmPodScrape.labels`, or per Instance
-with `podMonitorLabels` / `podScrapeLabels` (which win on conflicts).
+| Component | Kind | Port | Path |
+|---|---|---|---|
+| PD | `tidb.pd` | `client` | `/metrics` |
+| TiKV | `tikv` | `status` | `/metrics` |
+| TiDB | `tidb` | `status` | `/metrics` |
+| TiFlash | `tidb.tiflash` | `metrics`, `proxy-metrics` | `/metrics` |
+| TiProxy | `tidb.tiproxy` | `api` | `/api/metrics` |
 
-> [!NOTE]
-> Turn on the toggle of the monitoring system you run; the provider creates its scrape object
-> itself rather than relying on a VictoriaMetrics Operator converting the `PodMonitor`. If your
-> VictoriaMetrics Operator does convert Prometheus Operator objects, it also turns the
-> `PodMonitor` into a `VMPodScrape` named `<instance>-metrics`, so with both toggles on a
-> `VMAgent` scrapes every component twice.
+The class's extension (for example
+[monitoring-victoriametrics](https://github.com/openeverest/monitoring-victoriametrics) or
+[monitoring-prometheus](https://github.com/openeverest/monitoring-prometheus)) creates the scrape
+resources from these endpoints. With [mTLS](#security) every metrics port requires a client
+certificate, so the endpoints are https and name the cluster client certificate
+(`<instance>-cluster-client-secret`) the scraper presents, and the server name each component's
+certificate carries (`<instance>-<component>`).
+
+`kubectl get monitoringbindings` lists one binding per destination entry, and the
+instance's `MonitoringConfigured` condition reports whether every entry is configured.
 
 ### Security
 
@@ -543,8 +624,7 @@ mysql -h <host> -P 4000 -u root -p --ssl-mode=VERIFY_IDENTITY --ssl-ca=ca.crt
 TiDB still accepts plaintext connections unless you require TLS, e.g. with
 `ALTER USER ... REQUIRE SSL` or by setting `require_secure_transport`.
 
-With mTLS, the [monitoring](#monitoring) `PodMonitor` and `VMPodScrape` scrape over https
-with the cluster client certificate.
+With mTLS, [monitoring](#monitoring) scrapes over https with the cluster client certificate.
 
 > [!NOTE]
 > The certificates are valid for ten years and are not rotated yet: TiDB Operator does not
@@ -608,8 +688,31 @@ upgrade.
   deployment settings and the bundled `operator` subchart values.
 - **Instance parameters:** per-component `config` (inline TOML) and per-topology parameters,
   defined under [definition/](definition/) and published on the `Provider` resource
-  (`kubectl get provider tidb -o yaml`). The API server and the UI validate user input against
-  these schemas.
+  (`kubectl get provider tidb -o yaml`). The provider rejects an Instance that does not match
+  them (see [Validation](#validation)), and the UI checks the form against them as you type.
+
+### Validation
+
+The provider validates an `Instance` when it is written, through its admission webhook, and again
+before every reconcile:
+
+```console
+$ kubectl apply -f instance.yaml
+The Instance "orders" is invalid: spec.components[pd].replicas: Invalid value: 2: pd replicas must be an odd number, got 2
+```
+
+- **Checked at admission:** the published parameter schemas, the version catalog and the
+  provider's rules about the Instance itself: the name length, the required components, an odd
+  PD count, valid component versions in TiDB's upgrade order and the cert-manager settings.
+- **Checked against the running cluster:** changes the live TiDB groups cannot take (a
+  downgrade, a TiKV scale-in below PD's `max-replicas`, a TiKV memory limit below the minimum, a
+  smaller volume, new TLS settings) and cert-manager's CRDs when `tls.certManager` asks for
+  them. These never block a write: at admission they are
+  warnings, which `kubectl` prints, and the provider then holds the change back, reporting it in
+  the `Instance`'s `Ready` condition with reason `InvalidReference` until it is reverted or the
+  CRD is installed.
+- **In a pull request:** run `kubectl apply --dry-run=server -f <instance>.yaml` in CI to get the
+  same errors and warnings without changing anything.
 
 ### TiKV memory and disk
 
@@ -687,14 +790,14 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 
 | Symptom | Where to look |
 |---|---|
-| `Instance` stuck in `Provisioning` | `kubectl describe instances.core.openeverest.io <name>` conditions, then the provider logs |
+| `Instance` stuck `Pending`, or `Ready` stays `False` | `kubectl describe instances.core.openeverest.io <name>`: the `Ready` condition's message names the components waited for; then the provider logs |
 | No `Provider` resource in the cluster | Is the chart installed? Check the provider deployment logs |
 | `Instance` ignored entirely | `spec.providerRef.name` must be `tidb` |
 | Provider logs `no matches for kind "TiKVGroup"` | TiDB CRDs missing. The chart's pre-install hook installs them; check the `<release>-crd-installer` Job (and its egress to `crds.url`), or apply them manually: `kubectl apply --server-side -f <crds.url>` |
 | Operator pod `CrashLoopBackOff` at startup | The TiDB CRDs must exist before the operator starts (see the row above) |
 | Groups created but no pods | Inspect the group/instance status (`kubectl get tidbgroup,tikvgroup,pdgroup`) — the failure is upstream in the operator |
 | Storage size raised but PVCs unchanged | The StorageClass must allow volume expansion; check `kubectl get pvc` and the operator logs |
-| `Instance` turns `Failed` right after an edit, with no message | The provider rejected the change. The reason is in the provider logs (`Validation failed`); see [Known issues](#known-issues). Typical causes: shrinking storage, downgrading or reordering versions, scaling TiKV below PD's `max-replicas`, changing TLS after creation. Revert the change to return to `Ready` |
+| An edit is applied with a `Warning:` and nothing changes | The provider holds the change back; the `Instance`'s `Ready` condition (reason `InvalidReference`) says why. Typical causes: shrinking storage, a downgrade, scaling TiKV below PD's `max-replicas`, changing TLS after creation, or cert-manager's CRDs not being installed. Revert the change, or install the CRD; see [Validation](#validation) |
 | `Backup` or `Restore` stays `Running` | `kubectl get jobs` in the Instance's namespace and the BR job's pod logs; the BR `Backup`/`Restore` (`backups.br.pingcap.com`) conditions carry the reason |
 | TiProxy runs but does not migrate sessions | `kubectl get cluster.core.pingcap.com <instance> -o jsonpath='{.spec.featureGates}'` must list `SessionTokenSigning`. On an existing Instance the provider adds it only once every TiDB instance lists `FeatureModification` (`kubectl get tidb -o jsonpath='{.items[*].spec.features}'`); see [TiProxy](#tiproxy) |
 | TiKV pods restart with `OOMKilled`, or writes fail with `tikv disk full` early | The TiKV memory limit or volume is too small; see [TiKV memory and disk](#tikv-memory-and-disk) |
@@ -702,9 +805,6 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 
 ## Known issues
 
-- **Rejected changes show no reason.** When `Validate` rejects a change the `Instance` turns
-  `Failed` without a message; the reason is only in the provider logs. Fixed in the OpenEverest
-  provider runtime (openeverest/openeverest#3346) and picked up once a release includes it.
 - **No certificate rotation** ([#66](https://github.com/openeverest/provider-tidb/issues/66)).
   Certificates are issued for ten years and not renewed (see [Security](#security)).
 

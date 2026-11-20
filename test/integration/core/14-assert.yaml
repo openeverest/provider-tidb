@@ -1,8 +1,10 @@
-# Validate rejects shrinking a data volume, so the Instance fails instead of
-# rolling the change out.
+# Shrinking a data volume is checked against the live TiKVGroup, so admission
+# only warns and the reconciler blocks the change instead of rolling it out.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
   name: test-instance
 status:
-  phase: Failed
+  (conditions[?type == 'Ready']):
+    - status: "False"
+      reason: InvalidReference

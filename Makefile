@@ -7,16 +7,10 @@ $(LOCALBIN):
 CONTAINER_TOOL ?= docker
 
 # OpenEverest branch to use for OpenEverest CRD installation.
-OPENEVEREST_BRANCH ?= main
+OPENEVEREST_BRANCH ?= v2.0.0-alpha.1
 
 # TiDB Operator (v2) version whose CRDs and image the provider targets.
 OPERATOR_VERSION ?= v2.0.1
-
-# Prometheus Operator version whose PodMonitor CRD the provider targets.
-PROMETHEUS_OPERATOR_VERSION ?= v0.94.1
-
-# VictoriaMetrics Operator version whose VMPodScrape CRD the provider targets.
-VM_OPERATOR_VERSION ?= v0.66.1
 
 # cert-manager version whose CRDs the provider targets for tls.certManager.
 CERT_MANAGER_VERSION ?= v1.20.2
@@ -59,8 +53,8 @@ help: ## Display this help.
 ##@ Development
 
 .PHONY: run
-run: generate ## Run the provider locally.
-	go run cmd/provider/main.go
+run: generate ## Run the provider locally, without the admission webhook (it needs the chart's certificate).
+	go run cmd/provider/main.go --admission=false
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint.
@@ -103,11 +97,11 @@ generate: manifests helm-sync-rbac ## Run all code generation (RBAC + Helm sync 
 .PHONY: verify
 verify: ## Verify that generated files are up-to-date (for CI).
 	@$(MAKE) generate
-	@if git diff --quiet -- config/ $(CHART_DIR)/generated/; then \
+	@if git diff --quiet -- config/ definition/ $(CHART_DIR)/generated/; then \
 		echo "Generated files are up-to-date."; \
 	else \
 		echo "ERROR: Generated files are out of date. Run 'make generate' and commit the changes."; \
-		git diff -- config/ $(CHART_DIR)/generated/; \
+		git diff -- config/ definition/ $(CHART_DIR)/generated/; \
 		exit 1; \
 	fi
 
@@ -217,14 +211,6 @@ install-crds: yq ## Install OpenEverest CRDs (and your operator's CRDs) into the
 	# TiDB Operator BR CRDs used by the backup provider.
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/br.pingcap.com_backups.yaml
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/br.pingcap.com_restores.yaml
-	# Prometheus Operator PodMonitor the provider creates while monitoring is enabled.
-	kubectl apply --server-side -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/$(PROMETHEUS_OPERATOR_VERSION)/example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml
-	# VictoriaMetrics Operator VMPodScrape, picked out of the operator's combined CRD manifest.
-	# Clusters running the VictoriaMetrics Operator already have it, so only install it when missing.
-	kubectl get crd vmpodscrapes.operator.victoriametrics.com >/dev/null 2>&1 || \
-		curl -fsSL https://raw.githubusercontent.com/VictoriaMetrics/operator/$(VM_OPERATOR_VERSION)/config/crd/overlay/crd.yaml \
-		| $(YQ) 'select(.metadata.name == "vmpodscrapes.operator.victoriametrics.com")' \
-		| kubectl apply --server-side -f -
 	# cert-manager CRDs for tls.certManager; clusters running cert-manager already have them.
 	kubectl get crd certificates.cert-manager.io >/dev/null 2>&1 || \
 		kubectl apply --server-side -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.crds.yaml

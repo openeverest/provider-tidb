@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"time"
@@ -40,8 +41,6 @@ const (
 	brRestoreWithLogBackupVersion = "v8.5.5"
 	// brFinalizer is TiDB Operator's finalizer on BR Backups.
 	brFinalizer = "pingcap.com/finalizer"
-
-	reasonPITRStorageInvalid = "PITRStorageInvalid"
 )
 
 // Reasons published on InstanceBackupStoragePITRStatus.
@@ -57,11 +56,11 @@ var _ controller.InstanceBackupStatusReporter = (*Provider)(nil)
 
 func logBackupName(instance string) string { return instance + logBackupSuffix }
 
-// logBackupPrefix is where an Instance's log backup lives in the bucket. A
-// Kubernetes name can't contain "_", so no snapshot backup's
-// "<namespace>/<instance>/<backup>" prefix collides with it.
-func logBackupPrefix(namespace, instance string) string {
-	return fmt.Sprintf("%s/%s/_log", namespace, instance)
+// logBackupDir is where an Instance's log backup lives under the path of its
+// storage entry. A Kubernetes name can't contain "_", so no snapshot
+// backup's folder, named after the backup, collides with it.
+func logBackupDir(storagePath string) string {
+	return path.Join(storagePath, "_log")
 }
 
 // pitrStorage returns the storage with point-in-time recovery enabled, if any.
@@ -102,25 +101,42 @@ func syncLogBackup(c *controller.Context) error {
 		return nil
 	}
 
-	bs, err := c.BackupStorage(storage.StorageRef.Name)
-	if apierrors.IsNotFound(err) {
-		return &controller.BackupConfigError{Reason: reasonPITRStorageInvalid,
-			Message: fmt.Sprintf("BackupStorage %q for point-in-time recovery not found", storage.StorageRef.Name)}
-	}
-	if err != nil {
+	resolved, err := resolvedBackupStorage(c, storage.StorageRef.Name)
+	if err != nil || resolved == nil || !resolved.Apply() {
+		// The runtime reports why the entry is held on BackupConfigured; a
+		// running log backup keeps going with what it has, and none starts.
 		return err
 	}
-	if bs.Spec.S3 == nil {
-		return &controller.BackupConfigError{Reason: reasonPITRStorageInvalid,
-			Message: fmt.Sprintf("BackupStorage %q is not S3-backed", bs.Name)}
+	rendered, err := renderBRStorage(c, resolved.Storage, logBackupDir(resolved.Path), brSecretName(name))
+	if err != nil {
+		if isAPIError(err) {
+			return err
+		}
+		c.RejectBackupStorage(resolved.Name(), err)
+		return nil
 	}
-	if err := ensureBRCredentials(c, c.Instance(), brSecretName(name), bs); err != nil {
+	if err := ensureBRCredentials(c, c.Instance(), brSecretName(name), rendered.credentials); err != nil {
 		return err
 	}
 	if err := ensureBackupManagerRBAC(c, c.Namespace()); err != nil {
 		return err
 	}
-	return c.Apply(buildLogBackup(c, bs))
+	return c.Apply(buildLogBackup(c, resolved.Name(), rendered.s3))
+}
+
+// resolvedBackupStorage returns the Instance's storage entry naming the
+// BackupStorage name, as the runtime resolved and judged it.
+func resolvedBackupStorage(c *controller.Context, name string) (*controller.ResolvedBackupStorage, error) {
+	storages, err := c.BackupStorages()
+	if err != nil {
+		return nil, err
+	}
+	for i := range storages {
+		if storages[i].Name() == name {
+			return &storages[i], nil
+		}
+	}
+	return nil, nil
 }
 
 // readyForLogBackup reports whether the log backup may start: BR needs PD and
@@ -132,20 +148,19 @@ func readyForLogBackup(c *controller.Context) bool {
 	return clusterReady(c)
 }
 
-func buildLogBackup(c *controller.Context, storage *backupv1alpha1.BackupStorage) *tidbbrv1.Backup {
-	name := logBackupName(c.Name())
+func buildLogBackup(c *controller.Context, storage string, s3 *tidbbrv1.S3StorageProvider) *tidbbrv1.Backup {
 	return &tidbbrv1.Backup{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
+			Name:        logBackupName(c.Name()),
 			Namespace:   c.Namespace(),
-			Annotations: map[string]string{annotationLogBackupStorage: storage.Name},
+			Annotations: map[string]string{annotationLogBackupStorage: storage},
 		},
 		Spec: tidbbrv1.BackupSpec{
 			Mode:            tidbbrv1.BackupModeLog,
 			LogSubcommand:   tidbbrv1.LogStartCommand,
 			CleanPolicy:     tidbbrv1.CleanPolicyTypeDelete,
 			ServiceAccount:  backupManagerName,
-			StorageProvider: tidbbrv1.StorageProvider{S3: brS3Storage(storage.Spec.S3, logBackupPrefix(c.Namespace(), c.Name()), brSecretName(name))},
+			StorageProvider: tidbbrv1.StorageProvider{S3: s3},
 			BR:              &tidbbrv1.BRConfig{Cluster: c.Name(), ClusterNamespace: c.Namespace()},
 		},
 	}
@@ -219,11 +234,13 @@ func restoreBlockedByLogBackup(c *controller.Context) (controller.RestoreExecuti
 	}, true, nil
 }
 
-// logStream is a running log backup, its positions as TSOs.
+// logStream is a running log backup, its positions as TSOs, and the folder
+// in its storage it writes to.
 type logStream struct {
 	start          uint64
 	truncatedUntil uint64
 	checkpoint     uint64
+	dir            string
 }
 
 // openLogStream reads the log backup instance writes to storage. Without a
@@ -243,6 +260,9 @@ func openLogStream(c *controller.Context, instance, storage string) (*logStream,
 		return nil, unavailablePITR(pitrReasonFailed, brFailureMessage(logBackup)), nil
 	}
 	stream := &logStream{}
+	if logBackup.Spec.S3 != nil {
+		stream.dir = logBackup.Spec.S3.Prefix
+	}
 	if stream.start, err = tidbbrv1.ParseTSString(logBackup.Status.CommitTs); err != nil {
 		return nil, nil, fmt.Errorf("log backup %s start: %w", logBackup.Name, err)
 	}
@@ -258,10 +278,12 @@ func openLogStream(c *controller.Context, instance, storage string) (*logStream,
 	return stream, nil, nil
 }
 
-// pitrBase is a full backup a point-in-time restore can start from.
+// pitrBase is a full backup a point-in-time restore can start from, and
+// the folder in its storage BR wrote it to.
 type pitrBase struct {
 	name string
 	ts   uint64
+	dir  string
 }
 
 // pitrBases returns the full backups of instance on storage that the stream
@@ -293,7 +315,11 @@ func pitrBases(c *controller.Context, instance, storage string, stream *logStrea
 		if err != nil || ts < floor {
 			continue
 		}
-		bases = append(bases, pitrBase{name: b.Name, ts: ts})
+		base := pitrBase{name: b.Name, ts: ts}
+		if snapshot.Spec.S3 != nil {
+			base.dir = snapshot.Spec.S3.Prefix
+		}
+		bases = append(bases, base)
 	}
 	sort.Slice(bases, func(i, j int) bool { return bases[i].ts < bases[j].ts })
 	return bases, nil
@@ -472,11 +498,19 @@ func startPointInTimeRestore(c *controller.Context, restore *backupv1alpha1.Rest
 	if err != nil {
 		return controller.RestoreExecutionStatus{}, err
 	}
-	if storage.Spec.S3 == nil {
-		return failed("BackupStorage %q is not S3-backed", storage.Name), nil
-	}
+	// BR reads the log and the full backup where the source's BR jobs wrote
+	// them, with the log storage's endpoint and credentials.
 	secret := brSecretName(restore.Name)
-	if err := ensureBRCredentials(c, restore, secret, storage); err != nil {
+	logStorage, err := renderBRStorage(c, storage, stream.dir, secret)
+	if err != nil {
+		if isAPIError(err) {
+			return controller.RestoreExecutionStatus{}, err
+		}
+		return failed("BackupStorage %q cannot be used: %v", storage.Name, err), nil
+	}
+	fullStorage := *logStorage.s3
+	fullStorage.Prefix = base.dir
+	if err := ensureBRCredentials(c, restore, secret, logStorage.credentials); err != nil {
 		return controller.RestoreExecutionStatus{}, err
 	}
 	if err := ensureBackupManagerRBAC(c, restore.Namespace); err != nil {
@@ -490,15 +524,12 @@ func startPointInTimeRestore(c *controller.Context, restore *backupv1alpha1.Rest
 			Annotations: map[string]string{annotationPITRBaseBackup: base.name},
 		},
 		Spec: tidbbrv1.RestoreSpec{
-			Mode:            tidbbrv1.RestoreModePiTR,
-			ServiceAccount:  backupManagerName,
-			StorageProvider: tidbbrv1.StorageProvider{S3: brS3Storage(storage.Spec.S3, logBackupPrefix(restore.Namespace, source), secret)},
-			// BR reads the full backup with the log storage's endpoint and credentials.
-			PitrFullBackupStorageProvider: tidbbrv1.StorageProvider{
-				S3: brS3Storage(storage.Spec.S3, backupPrefix(restore.Namespace, source, base.name), secret),
-			},
-			PitrRestoredTs: strconv.FormatUint(target, 10),
-			BR:             &tidbbrv1.BRConfig{Cluster: c.Name(), ClusterNamespace: c.Namespace()},
+			Mode:                          tidbbrv1.RestoreModePiTR,
+			ServiceAccount:                backupManagerName,
+			StorageProvider:               tidbbrv1.StorageProvider{S3: logStorage.s3},
+			PitrFullBackupStorageProvider: tidbbrv1.StorageProvider{S3: &fullStorage},
+			PitrRestoredTs:                strconv.FormatUint(target, 10),
+			BR:                            &tidbbrv1.BRConfig{Cluster: c.Name(), ClusterNamespace: c.Namespace()},
 		},
 	}
 	if err := controllerutil.SetControllerReference(restore, brRestore, c.Client().Scheme()); err != nil {
