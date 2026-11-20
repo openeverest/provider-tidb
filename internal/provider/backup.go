@@ -1,8 +1,10 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,11 +15,22 @@ import (
 
 	backupv1alpha1 "github.com/openeverest/openeverest/v2/api/backup/v1alpha1"
 	commonv1alpha1 "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
+	s3class "github.com/openeverest/openeverest/v2/backupstorageclasses/s3"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbbrv1 "github.com/pingcap/tidb-operator/api/v2/br/v1alpha1"
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
+
+	"github.com/openeverest/provider-tidb/definition/backupclasses"
 )
+
+// backupClassName is the BackupClass the provider ships, defined in
+// definition/backupclasses.
+const backupClassName = "br"
+
+// errBackupLocationUnknown is returned for a backup whose path in its storage
+// was never recorded.
+var errBackupLocationUnknown = errors.New("the backup's path in its storage is unknown")
 
 // brSecretName is the BR-format credentials Secret derived from the OpenEverest
 // BackupStorage credentials (BR expects access_key/secret_key keys).
@@ -31,9 +44,13 @@ const s3CompatibleProvider tidbbrv1.S3StorageProviderType = "other"
 // brS3Provider tells BR what kind of S3 storage it writes to. As "aws", BR
 // looks up the bucket's region and refuses to run unless it matches the
 // configured one, which S3-compatible stores answer with their own names (Ceph
-// RGW and Linode say "default"). Any other endpoint is an S3-compatible store,
-// for which BR uses the endpoint and region as given.
-func brS3Provider(endpoint string) tidbbrv1.S3StorageProviderType {
+// RGW and Linode say "default"). So only Amazon S3 at an amazonaws.com
+// endpoint is "aws"; anything else is an S3-compatible store, for which BR uses
+// the endpoint and region as given.
+func brS3Provider(implementation s3class.Implementation, endpoint string) tidbbrv1.S3StorageProviderType {
+	if implementation != s3class.ImplementationAWS {
+		return s3CompatibleProvider
+	}
 	if endpoint == "" {
 		return tidbbrv1.S3StorageProviderTypeAWS
 	}
@@ -44,33 +61,66 @@ func brS3Provider(endpoint string) tidbbrv1.S3StorageProviderType {
 	return s3CompatibleProvider
 }
 
-// backupPrefix is the object-key prefix within the bucket, unique per backup so
-// backups sharing a bucket never collide.
-func backupPrefix(namespace, instance, backupName string) string {
-	return fmt.Sprintf("%s/%s/%s", namespace, instance, backupName)
+// brStorage is an s3 BackupStorage rendered for BR.
+type brStorage struct {
+	s3          *tidbbrv1.S3StorageProvider
+	credentials s3class.Credentials
 }
 
-// brS3Storage points BR at prefix in an OpenEverest S3 BackupStorage, reading
-// credentials from the BR-format Secret secretName.
-func brS3Storage(s3 *backupv1alpha1.BackupStorageS3Spec, prefix, secretName string) *tidbbrv1.S3StorageProvider {
-	return &tidbbrv1.S3StorageProvider{
-		Provider:   brS3Provider(s3.EndpointURL),
-		Region:     s3.Region,
-		Bucket:     s3.Bucket,
-		Endpoint:   s3.EndpointURL,
-		Prefix:     prefix,
-		SecretName: secretName,
+// renderBRStorage renders an s3 BackupStorage as BR's S3 storage writing
+// under prefix in its bucket, reading credentials from the BR-format Secret
+// secretName. A storage BR cannot use is an error wrapping the runtime's
+// sentinel, for RejectBackupStorage.
+func renderBRStorage(c *controller.Context, bs *backupv1alpha1.BackupStorage, prefix, secretName string) (brStorage, error) {
+	params, credentials, err := c.BackupStorageS3(bs)
+	if err != nil {
+		return brStorage{}, err
 	}
+	implementation := params.EffectiveImplementation()
+	if implementation == s3class.ImplementationGCS {
+		return brStorage{}, fmt.Errorf("BR cannot use GCS through its S3 client: %w", controller.ErrImplementationUnsupported)
+	}
+	if _, err := c.BackupStorageTLS(bs, backupclasses.TLSSupport(backupClassName, s3class.ClassName)); err != nil {
+		return brStorage{}, err
+	}
+	return brStorage{
+		s3: &tidbbrv1.S3StorageProvider{
+			Provider:   brS3Provider(implementation, params.EndpointURL),
+			Region:     params.Region,
+			Bucket:     bs.Spec.Location.ObjectStore.Bucket,
+			Endpoint:   params.EndpointURL,
+			Prefix:     prefix,
+			SecretName: secretName,
+		},
+		credentials: credentials,
+	}, nil
+}
+
+// isAPIError reports whether err is a failed read of the cluster, which is
+// retried, rather than a storage BR cannot use.
+func isAPIError(err error) bool {
+	var status apierrors.APIStatus
+	return errors.As(err, &status)
+}
+
+// backupDir is the folder of backup's snapshot in its storage: a folder named
+// after the backup under the path the runtime recorded when it started.
+func backupDir(c *controller.Context, backup *backupv1alpha1.Backup, bs *backupv1alpha1.BackupStorage) (string, error) {
+	location := c.BackupLocation(backup, bs)
+	if location == "" {
+		return "", errBackupLocationUnknown
+	}
+	if backup.Spec.Origin.External != nil {
+		return location, nil
+	}
+	return path.Join(location, backup.Name), nil
 }
 
 // ensureBRCredentials writes the BackupStorage credentials into the Secret
 // name, owned by owner. BR reads S3 credentials from access_key/secret_key,
 // which differ from OpenEverest's AWS_* keys.
-func ensureBRCredentials(c *controller.Context, owner client.Object, name string, storage *backupv1alpha1.BackupStorage) error {
-	accessKeyID, secretAccessKey, err := c.BackupStorageCredentials(storage)
-	if err != nil {
-		return err
-	}
+func ensureBRCredentials(c *controller.Context, owner client.Object, name string, credentials s3class.Credentials) error {
+	accessKeyID, secretAccessKey := credentials.AccessKeyID, credentials.SecretAccessKey
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: c.Namespace()},
 		Type:       corev1.SecretTypeOpaque,
@@ -105,14 +155,25 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 	if err != nil {
 		return controller.BackupExecutionStatus{}, err
 	}
-	if storage.Spec.S3 == nil {
+	dir, err := backupDir(c, backup, storage)
+	if err != nil {
+		return controller.BackupExecutionStatus{
+			State:   backupv1alpha1.BackupStatePending,
+			Message: fmt.Sprintf("Waiting for the path of backup storage %q to be recorded", storage.Name),
+		}, nil
+	}
+	rendered, err := renderBRStorage(c, storage, dir, brSecretName(backup.Name))
+	if err != nil {
+		if isAPIError(err) {
+			return controller.BackupExecutionStatus{}, err
+		}
 		return controller.BackupExecutionStatus{
 			State:   backupv1alpha1.BackupStateFailed,
-			Message: fmt.Sprintf("BackupStorage %q is not S3-backed", storage.Name),
+			Message: fmt.Sprintf("BackupStorage %q cannot be used: %v", storage.Name, err),
 		}, nil
 	}
 
-	if err := ensureBRCredentials(c, backup, brSecretName(backup.Name), storage); err != nil {
+	if err := ensureBRCredentials(c, backup, brSecretName(backup.Name), rendered.credentials); err != nil {
 		return controller.BackupExecutionStatus{}, err
 	}
 
@@ -132,7 +193,7 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 		brBackup.Spec.Type = tidbbrv1.BackupTypeFull
 		brBackup.Spec.Mode = tidbbrv1.BackupModeSnapshot
 		brBackup.Spec.CleanPolicy = cleanPolicyFor(backup.Spec.DeletionPolicy)
-		brBackup.Spec.S3 = brS3Storage(storage.Spec.S3, backupPrefix(c.Namespace(), c.Name(), backup.Name), brSecretName(backup.Name))
+		brBackup.Spec.S3 = rendered.s3
 		brBackup.Spec.BR = &tidbbrv1.BRConfig{
 			Cluster:          c.Name(),
 			ClusterNamespace: c.Namespace(),
@@ -230,17 +291,28 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 	if err != nil {
 		return controller.RestoreExecutionStatus{}, err
 	}
-	if storage.Spec.S3 == nil {
+	// BR reads the backup from the folder SyncBackup wrote it to, under the
+	// path the source backup recorded, so it resolves after the source
+	// Instance is gone.
+	dir, err := backupDir(c, srcBackup, storage)
+	if err != nil {
 		return controller.RestoreExecutionStatus{
 			State:   backupv1alpha1.RestoreStateFailed,
-			Message: fmt.Sprintf("BackupStorage %q is not S3-backed", storage.Name),
+			Message: fmt.Sprintf("BackupLocationUnknown: backup %q: %v", srcBackup.Name, err),
 		}, nil
 	}
-	// BR reads the backup from the same object-key prefix SyncBackup wrote it to,
-	// derived from the SOURCE backup's identity (so clones read the source data).
-	prefix := backupPrefix(srcBackup.Namespace, srcBackup.Spec.Origin.InstanceRef.Name, srcBackup.Name)
+	rendered, err := renderBRStorage(c, storage, dir, brSecretName(restore.Name))
+	if err != nil {
+		if isAPIError(err) {
+			return controller.RestoreExecutionStatus{}, err
+		}
+		return controller.RestoreExecutionStatus{
+			State:   backupv1alpha1.RestoreStateFailed,
+			Message: fmt.Sprintf("BackupStorage %q cannot be used: %v", storage.Name, err),
+		}, nil
+	}
 
-	if err := ensureBRCredentials(c, restore, brSecretName(restore.Name), storage); err != nil {
+	if err := ensureBRCredentials(c, restore, brSecretName(restore.Name), rendered.credentials); err != nil {
 		return controller.RestoreExecutionStatus{}, err
 	}
 
@@ -255,7 +327,7 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 		brRestore.Spec.ServiceAccount = backupManagerName
 		brRestore.Spec.Type = tidbbrv1.BackupTypeFull
 		brRestore.Spec.Mode = tidbbrv1.RestoreModeSnapshot
-		brRestore.Spec.S3 = brS3Storage(storage.Spec.S3, prefix, brSecretName(restore.Name))
+		brRestore.Spec.S3 = rendered.s3
 		brRestore.Spec.BR = &tidbbrv1.BRConfig{
 			Cluster:          c.Name(),
 			ClusterNamespace: c.Namespace(),

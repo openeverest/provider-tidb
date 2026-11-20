@@ -38,7 +38,7 @@ permissions:
 env:
   IMG: provider-tidb:ci
   # Branch of openeverest/openeverest to build the platform from.
-  OPENEVEREST_BRANCH: db82ef6151acd7da6604b2cb998dfb97b14425b1
+  OPENEVEREST_BRANCH: 3a639f48ff47ba0f8cafe196107b8399f07493fd
 
 jobs:
   run:

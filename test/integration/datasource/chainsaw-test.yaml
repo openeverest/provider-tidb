@@ -36,6 +36,8 @@ spec:
         - apply:
             file: 10-source.yaml
         - assert:
+            file: ../backup-storage-ready.yaml
+        - assert:
             file: 10-assert.yaml
 
     - name: source-backup

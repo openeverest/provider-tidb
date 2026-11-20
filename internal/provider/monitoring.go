@@ -35,7 +35,7 @@ type metricsPort struct {
 // ports, its own and its embedded TiKV proxy's.
 var componentMetrics = []struct {
 	component string
-	// kind matches the component type's kind in definition/monitoring.yaml.
+	// kind matches the component type's kind in definition/provider.yaml.
 	kind  string
 	ports []metricsPort
 	// group returns an empty component group and a reader of its ready pods.

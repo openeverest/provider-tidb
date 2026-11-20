@@ -7,7 +7,7 @@ $(LOCALBIN):
 CONTAINER_TOOL ?= docker
 
 # OpenEverest branch to use for OpenEverest CRD installation.
-OPENEVEREST_BRANCH ?= db82ef6151acd7da6604b2cb998dfb97b14425b1
+OPENEVEREST_BRANCH ?= 3a639f48ff47ba0f8cafe196107b8399f07493fd
 
 # TiDB Operator (v2) version whose CRDs and image the provider targets.
 OPERATOR_VERSION ?= v2.0.1
@@ -97,11 +97,11 @@ generate: manifests helm-sync-rbac ## Run all code generation (RBAC + Helm sync 
 .PHONY: verify
 verify: ## Verify that generated files are up-to-date (for CI).
 	@$(MAKE) generate
-	@if git diff --quiet -- config/ $(CHART_DIR)/generated/; then \
+	@if git diff --quiet -- config/ definition/ $(CHART_DIR)/generated/; then \
 		echo "Generated files are up-to-date."; \
 	else \
 		echo "ERROR: Generated files are out of date. Run 'make generate' and commit the changes."; \
-		git diff -- config/ $(CHART_DIR)/generated/; \
+		git diff -- config/ definition/ $(CHART_DIR)/generated/; \
 		exit 1; \
 	fi
 

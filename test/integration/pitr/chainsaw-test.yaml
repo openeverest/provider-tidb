@@ -60,6 +60,8 @@ spec:
             file: ../e2e/71-assert.yaml
         - apply:
             file: ../e2e/72-backup-storage.yaml
+        - assert:
+            file: ../backup-storage-ready.yaml
 
     - name: log-backup-runs
       try:

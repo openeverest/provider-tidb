@@ -67,7 +67,7 @@ Optional integrations, needed only for the features that use them:
 |---|---|---|
 | [Monitoring](#monitoring) | A monitoring extension, e.g. [monitoring-victoriametrics](https://github.com/openeverest/monitoring-victoriametrics) or [monitoring-prometheus](https://github.com/openeverest/monitoring-prometheus) | monitoring-victoriametrics |
 | [Certificates from cert-manager](#certificates-from-cert-manager) | cert-manager | `v1.20.2` |
-| [Backups and restores](#capabilities) | S3-compatible object storage | AWS S3 API, SeaweedFS, Linode Object Storage |
+| [Backups and restores](#backup-storages) | S3-compatible object storage, as an `s3` `BackupStorage` | AWS S3 API, SeaweedFS, Linode Object Storage |
 
 The bundled operator manages TiDB engine versions independently (see [Versions](#versions)).
 
@@ -203,6 +203,14 @@ data.
   Instance is scraped twice.
 - The chart grants the provider read access to the monitoring classes, destinations and
   bindings and to namespaces, and drops its `PodMonitor` and `VMPodScrape` permissions.
+- **Breaking:** `BackupStorage`s use core's backup storage classes (`backupStorageClassRef`,
+  `location`, `parameters`, `authentication`, `tls`; see [Backup storages](#backup-storages)).
+  Backups and the point-in-time recovery log move to a path per Instance, so restores of
+  backups taken before the upgrade, which lack `status.path`, fail with `BackupLocationUnknown`,
+  and the log backup starts a new stream: take a full backup after the upgrade.
+- The `br` BackupClass names the provider in `providerManaged.providerRef` and declares the `s3`
+  storage class it writes to. The provider claims it, so the chart grants it `patch` on
+  `backupclasses/status` and read access to `backupstorageclasses`.
 
 ### Upgrading from 0.1.x
 
@@ -300,6 +308,45 @@ therefore has the source's root password; change it with `ALTER USER` and update
 source Instance's current root password is used, and if that Instance is gone the Restore's message
 says the password is unknown.
 
+### Backup storages
+
+The `br` BackupClass writes to `BackupStorage`s of the built-in `s3` class, with `AccessKey`
+authentication. Create the credentials Secret first, then the storage:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata: {name: my-s3-credentials}
+stringData:
+  AWS_ACCESS_KEY_ID: <key id>
+  AWS_SECRET_ACCESS_KEY: <secret>
+---
+apiVersion: backup.openeverest.io/v1alpha1
+kind: BackupStorage
+metadata: {name: my-s3}
+spec:
+  backupStorageClassRef: {name: s3}
+  location: {objectStore: {bucket: my-backups, prefix: team-a}}
+  parameters:
+    region: us-east-1
+    endpointURL: https://s3.us-east-1.amazonaws.com
+    implementation: aws       # minio, ceph or other for S3-compatible stores
+  authentication:
+    mode: AccessKey
+    credentialsSecretRef: {name: my-s3-credentials}
+```
+
+- Each Instance writes under its own path in the bucket,
+  `<prefix>/backups/<namespace>/<instance>/<uid>/<storage>`: a folder per full backup, named after
+  the `Backup`, and `_log` for the [point-in-time recovery](#point-in-time-recovery) log. Every
+  `Backup` records the path in `status.path`, so a restore finds it after the source Instance is
+  gone.
+- BR is told the store is Amazon S3 only for `implementation: aws` (or unset) at an
+  `amazonaws.com` endpoint; anything else is an S3-compatible store, whose region BR doesn't check.
+- Not supported, and reported as incompatible by core: `implementation: gcs` (BR can't reach GCS
+  through its S3 client), and `spec.tls` (a BR job trusts the system CA store only, and can't skip
+  verification). Serve the store with a publicly trusted certificate, or over `http://`.
+
 ### Point-in-time recovery
 
 Enable it on one storage of the Instance (TiDB runs one log backup per cluster):
@@ -316,7 +363,7 @@ spec:
 
 Once the cluster is ready the provider starts a BR log backup (`backupMode: log`), the
 `backups.br.pingcap.com` resource `<instance>-pitr`, that keeps running and writes TiKV's change
-log to `<namespace>/<instance>/_log` in the bucket. A point-in-time restore starts from a full
+log to `_log` under the Instance's path in the storage (see [Backup storages](#backup-storages)). A point-in-time restore starts from a full
 backup taken *after* the log backup started, so take one (on demand or from a schedule) to the same
 storage. `status.backup.storages[].pitr` on the Instance then reports the restorable window and the
 health of the log backup:

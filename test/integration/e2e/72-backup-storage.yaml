@@ -12,12 +12,17 @@ kind: BackupStorage
 metadata:
   name: s3-store
 spec:
-  type: s3
-  s3:
-    bucket: e2e-backups
+  backupStorageClassRef:
+    name: s3
+  location:
+    objectStore:
+      bucket: e2e-backups
+  parameters:
     region: us-east-1
     endpointURL: http://s3:9000
     forcePathStyle: true
-    verifyTLS: false
+    implementation: other
+  authentication:
+    mode: AccessKey
     credentialsSecretRef:
       name: s3-credentials

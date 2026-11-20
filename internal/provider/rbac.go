@@ -36,7 +36,8 @@ package provider
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=pds;tikvs;tidbs;tiflashes;tiproxies,verbs=get;list;watch
 
 // Backup: OpenEverest backup resources the runtime reconciles.
-// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupclasses;backupstorageclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupclasses/status,verbs=patch
 // +kubebuilder:rbac:groups=backup.openeverest.io,resources=backupstorages,verbs=get;list;watch
 // The backup scheduler creates Backups for schedule slots and deletes those past retention.
 // +kubebuilder:rbac:groups=backup.openeverest.io,resources=backups,verbs=get;list;watch;create;update;patch;delete

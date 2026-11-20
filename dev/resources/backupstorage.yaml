@@ -19,12 +19,17 @@ metadata:
   name: minio-s3
   namespace: __NAMESPACE__
 spec:
-  type: s3
-  s3:
-    bucket: backups
+  backupStorageClassRef:
+    name: s3
+  location:
+    objectStore:
+      bucket: backups
+  parameters:
     region: us-east-1
     endpointURL: http://minio.minio.svc.cluster.local:9000
     forcePathStyle: true
-    verifyTLS: false
+    implementation: minio
+  authentication:
+    mode: AccessKey
     credentialsSecretRef:
       name: minio-credentials

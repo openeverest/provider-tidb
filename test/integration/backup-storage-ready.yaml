@@ -1,0 +1,24 @@
+# The storage s3-store, once core has accepted it and judged that the BR class
+# the chart ships can write to it, and the class, once the provider has
+# claimed it and core has judged it compatible with the provider. Backups are
+# only admitted once core has published both verdicts.
+apiVersion: backup.openeverest.io/v1alpha1
+kind: BackupStorage
+metadata:
+  name: s3-store
+status:
+  (conditions[?type == 'Accepted'].status | [0]): "True"
+  (backupClasses[?name == 'br'].compatibility | [0]): Compatible
+---
+apiVersion: backup.openeverest.io/v1alpha1
+kind: BackupClass
+metadata:
+  name: br
+spec:
+  executionMode: ProviderManaged
+  providerManaged:
+    providerRef:
+      name: tidb
+status:
+  (conditions[?type == 'Accepted'].status | [0]): "True"
+  (providers[?name == 'tidb'].compatibility | [0]): Compatible

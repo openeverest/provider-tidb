@@ -11,10 +11,12 @@ spec:
   br:
     cluster: clone
   s3:
-    (ends_with(prefix, '/test-instance/_log')): true
+    (contains(prefix, '/test-instance/')): true
+    (ends_with(prefix, '/s3-store/_log')): true
   pitrFullBackupStorageProvider:
     s3:
-      (ends_with(prefix, '/test-instance/pitr-base')): true
+      (contains(prefix, '/test-instance/')): true
+      (ends_with(prefix, '/s3-store/pitr-base')): true
 status:
   phase: Complete
 ---

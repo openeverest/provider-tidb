@@ -19,9 +19,10 @@ import (
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
-// TestMonitoringContract keeps definition/monitoring.yaml, which core matches
-// bindings against, in step with what MonitoringSources publishes: every
-// component type serves its metrics natively under the kind published here.
+// TestMonitoringContract keeps definition/monitoring.yaml, and the kinds in
+// definition/provider.yaml, which core matches bindings against, in step with
+// what MonitoringSources publishes: every component type serves its metrics
+// natively under the kind published here.
 func TestMonitoringContract(t *testing.T) {
 	var contract corev1alpha1.ProviderMonitoring
 	readYAML(t, "../../definition/monitoring.yaml", &contract)
@@ -29,6 +30,9 @@ func TestMonitoringContract(t *testing.T) {
 		Components map[string]struct {
 			Type string `json:"type"`
 		} `json:"components"`
+		ComponentTypes map[string]struct {
+			Kind string `json:"kind"`
+		} `json:"componentTypes"`
 	}
 	readYAML(t, "../../definition/provider.yaml", &definition)
 
@@ -41,7 +45,10 @@ func TestMonitoringContract(t *testing.T) {
 	}
 	want := map[string]corev1alpha1.MonitoringComponentType{}
 	for typ, kind := range published {
-		want[typ] = corev1alpha1.MonitoringComponentType{Kind: kind, Metrics: corev1alpha1.MetricsSourceNative}
+		want[typ] = corev1alpha1.MonitoringComponentType{Metrics: corev1alpha1.MetricsSourceNative}
+		if got := definition.ComponentTypes[typ].Kind; got != kind {
+			t.Errorf("component type %s has kind %q in provider.yaml, want %q", typ, got, kind)
+		}
 	}
 	if !reflect.DeepEqual(contract.ComponentTypes, want) {
 		t.Errorf("componentTypes = %+v, want %+v", contract.ComponentTypes, want)

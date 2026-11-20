@@ -23,6 +23,7 @@ import (
 	tidbbrv1 "github.com/pingcap/tidb-operator/api/v2/br/v1alpha1"
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
+	"github.com/openeverest/provider-tidb/definition/backupclasses"
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
@@ -44,7 +45,7 @@ type Provider struct {
 
 // New creates a new TiDB Provider instance.
 func New() *Provider {
-	return &Provider{
+	p := &Provider{
 		BaseProvider: controller.BaseProvider{
 			ProviderName: common.ProviderName,
 			SchemeFuncs: []func(*runtime.Scheme) error{
@@ -76,6 +77,9 @@ func New() *Provider {
 			},
 		},
 	}
+	// The runtime claims the BackupClass the chart ships and executes it.
+	p.SetShippedBackupClasses(backupclasses.Shipped())
+	return p
 }
 
 // instanceForBRBackup maps a BR Backup to the Instance of the cluster it backs up.

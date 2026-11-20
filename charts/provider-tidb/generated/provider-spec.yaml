@@ -4,6 +4,7 @@ spec:
   componentTypes:
     pd:
       defaultVersion: v8.5.8
+      kind: tidb.pd
       versions:
         - image: pingcap/pd:v8.5.8
           version: v8.5.8
@@ -17,6 +18,7 @@ spec:
           version: v7.5.5
     tidb:
       defaultVersion: v8.5.8
+      kind: tidb
       versions:
         - image: pingcap/tidb:v8.5.8
           version: v8.5.8
@@ -30,6 +32,7 @@ spec:
           version: v7.5.5
     tiflash:
       defaultVersion: v8.5.8
+      kind: tidb.tiflash
       versions:
         - image: pingcap/tiflash:v8.5.8
           version: v8.5.8
@@ -43,6 +46,7 @@ spec:
           version: v7.5.5
     tikv:
       defaultVersion: v8.5.8
+      kind: tikv
       versions:
         - image: pingcap/tikv:v8.5.8
           version: v8.5.8
@@ -56,6 +60,7 @@ spec:
           version: v7.5.5
     tiproxy:
       defaultVersion: v1.3.3
+      kind: tidb.tiproxy
       versions:
         - image: pingcap/tiproxy:v1.3.3
           version: v1.3.3
@@ -65,40 +70,50 @@ spec:
     pd:
       parametersSchema:
         openAPIV3Schema:
+          description: PdParameters defines the parameters for pd (Placement Driver) components.
           properties:
             config:
+              description: Config is the inline TOML configuration file for PD.
               type: string
           type: object
       type: pd
     tidb:
       parametersSchema:
         openAPIV3Schema:
+          description: TidbParameters defines the parameters for tidb (SQL layer) components.
           properties:
             config:
+              description: Config is the inline TOML configuration file for TiDB.
               type: string
           type: object
       type: tidb
     tiflash:
       parametersSchema:
         openAPIV3Schema:
+          description: TiflashParameters defines the parameters for tiflash (columnar storage) components.
           properties:
             config:
+              description: Config is the inline TOML configuration file for TiFlash.
               type: string
           type: object
       type: tiflash
     tikv:
       parametersSchema:
         openAPIV3Schema:
+          description: TikvParameters defines the parameters for tikv (storage engine) components.
           properties:
             config:
+              description: Config is the inline TOML configuration file for TiKV.
               type: string
           type: object
       type: tikv
     tiproxy:
       parametersSchema:
         openAPIV3Schema:
+          description: TiproxyParameters defines the parameters for tiproxy (connection proxy) components.
           properties:
             config:
+              description: Config is the inline TOML configuration file for TiProxy.
               type: string
           type: object
       type: tiproxy
@@ -106,19 +121,14 @@ spec:
   monitoring:
     componentTypes:
       pd:
-        kind: tidb.pd
         metrics: Native
       tidb:
-        kind: tidb
         metrics: Native
       tiflash:
-        kind: tidb.tiflash
         metrics: Native
       tikv:
-        kind: tikv
         metrics: Native
       tiproxy:
-        kind: tidb.tiproxy
         metrics: Native
   release:
     version: 0.1.1
@@ -178,24 +188,49 @@ spec:
                 schedulingPolicy: {}
       parametersSchema:
         openAPIV3Schema:
+          description: |-
+            ClusterTopologyParameters defines topology-level parameters for the standard
+            distributed TiDB cluster. Per-component settings are expressed through
+            component specs.
           properties:
             tls:
+              description: |-
+                TLS configures encryption. Both settings are chosen when the Instance is
+                created and cannot be changed afterwards.
               properties:
                 certManager:
+                  description: |-
+                    CertManager issues the certificates with cert-manager. Chosen when the
+                    Instance is created, like the settings above.
                   properties:
                     enabled:
+                      description: |-
+                        Enabled issues the certificates with cert-manager. Without IssuerRef the
+                        provider sets up a self-signed CA in cert-manager for the Instance.
                       type: boolean
                     issuerRef:
+                      description: |-
+                        IssuerRef names the Issuer (in the Instance's namespace) or ClusterIssuer
+                        that signs the certificates; setting it implies Enabled. It must put the
+                        CA into the certificate Secrets (ca.crt), as CA and Vault issuers do.
                       properties:
                         kind:
+                          description: Kind is Issuer (default) or ClusterIssuer.
                           type: string
                         name:
+                          description: Name of the Issuer or ClusterIssuer.
                           type: string
                       type: object
                   type: object
                 client:
+                  description: |-
+                    Client lets MySQL clients connect to TiDB and TiProxy over TLS; TiProxy
+                    then reaches TiDB over TLS too.
                   type: boolean
                 cluster:
+                  description: |-
+                    Cluster encrypts and mutually authenticates the traffic between PD, TiKV,
+                    TiDB, TiFlash and TiProxy.
                   type: boolean
               type: object
           type: object

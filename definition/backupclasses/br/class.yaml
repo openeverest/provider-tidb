@@ -1,13 +1,32 @@
 # TiDB BR BackupClass.
 # Source of truth for the generated BackupClass manifest.
+#
+# provider-sdk generate makes the class ProviderManaged and names this
+# provider in providerManaged.providerRef: the provider claims and executes it.
+#
+# backupStorageClasses: BackupStorageClasses BR writes to, with their auth
+# modes, the parameters it supports (parametersSchema narrows the storage
+# class's schema) and the spec.tls settings it honours (tls).
 displayName: "TiDB BR"
 description: |
   Full snapshot backups of a TiDB cluster to S3-compatible storage, and a
   continuous log backup for point-in-time recovery, taken by the TiDB
   Operator's BR (Backup & Restore) tooling. Managed by the provider.
-executionMode: ProviderManaged
-supportedProviders:
-  - tidb
+backupStorageClasses:
+  - name: s3
+    authModes:
+      - AccessKey
+    parametersSchema:
+      openAPIV3Schema:
+        properties:
+          # BR cannot use GCS through its S3 client.
+          implementation:
+            enum: [aws, minio, ceph, other]
+    tls:
+      # A BR job takes neither a CA bundle nor a flag to skip verification:
+      # it trusts the system store only.
+      customCA: None
+      insecureSkipVerify: None
 providerManaged:
   # Point-in-time recovery runs a BR log backup (backupMode: log) to the storage
   # that enables it, and restores with restoreMode: pitr.
