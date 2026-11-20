@@ -233,9 +233,10 @@ func evaluateStatus(groups []groupRollout, tiproxy bool) controller.Status {
 	return withAvailability(status, groups, tiproxy)
 }
 
-// withAvailability reports whether clients can connect, from the ready pods
-// of each group, so it stays True through a rolling restart: PD keeps quorum,
-// a TiKV node at a time is down at most, and the SQL servers clients connect
+// withAvailability reports whether clients can connect, from the pods of
+// each group that exist and are ready, so it stays True through a rolling
+// restart and while new nodes join: PD keeps a quorum of its members, at most
+// one TiKV node that holds data is down, and the SQL servers clients connect
 // to (TiProxy, or TiDB) have a ready pod. With more TiKV nodes down, whether
 // every Region still has a majority of its replicas depends on where PD put
 // them, so the answer is unknown.
@@ -249,23 +250,31 @@ func withAvailability(status controller.Status, groups []groupRollout, tiproxy b
 		sql = byComponent[common.ComponentTiProxy]
 	}
 	pd, tikv := byComponent[common.ComponentPD], byComponent[common.ComponentTiKV]
-	pdReady, tikvReady := pd.groupStatus.ReadyReplicas, tikv.groupStatus.ReadyReplicas
+	pdMembers, pdReady := pd.existing(), pd.groupStatus.ReadyReplicas
+	tikvNodes, tikvReady := tikv.existing(), tikv.groupStatus.ReadyReplicas
+	tikvDown := tikvNodes - tikvReady
 	switch {
 	case sql.groupStatus.ReadyReplicas == 0:
 		return status.WithUnavailable(reasonNoSQLServerReady, fmt.Sprintf("No %s pod is ready", sql.component))
-	case pdReady <= pd.desired()/2:
+	case pdReady <= pdMembers/2:
 		return status.WithUnavailable(reasonNoPDQuorum,
-			fmt.Sprintf("PD has no quorum: %d of %d pods ready", pdReady, pd.desired()))
+			fmt.Sprintf("PD has no quorum: %d of %d members ready", pdReady, pdMembers))
 	case tikvReady == 0:
 		return status.WithUnavailable(reasonNoTiKVReady, "No TiKV pod is ready")
-	case tikvReady < tikv.desired()-1 || (tikvReady < tikv.desired() && tikv.desired() < 3):
+	case tikvDown > 1 || (tikvDown == 1 && tikvNodes < 3):
 		status.Available = controller.AvailabilityUnknown
 		status.AvailableReason = reasonTiKVNodesDown
 		status.AvailableMessage = fmt.Sprintf("%d of %d TiKV pods ready: some data may have no majority of its replicas",
-			tikvReady, tikv.desired())
+			tikvReady, tikvNodes)
 		return status
 	}
 	return status.WithAvailable(controller.Available)
+}
+
+// existing is the number of the group's pods that exist, as the operator
+// last counted them.
+func (g groupRollout) existing() int32 {
+	return max(g.groupStatus.Replicas, g.groupStatus.ReadyReplicas)
 }
 
 // instanceProblems reads the conditions the operator keeps on each PD, TiKV,

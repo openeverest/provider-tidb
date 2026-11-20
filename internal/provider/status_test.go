@@ -119,6 +119,8 @@ func TestEvaluateStatusReportsStuckInstance(t *testing.T) {
 
 func TestEvaluateStatusAvailability(t *testing.T) {
 	ready := func(g groupRollout, n int32) groupRollout { g.groupStatus.ReadyReplicas = n; return g }
+	// joining scales a converged group to desired before its new pods exist.
+	joining := func(g groupRollout, desired int32) groupRollout { g.replicas = &desired; return g }
 	tests := []struct {
 		name       string
 		groups     []groupRollout
@@ -144,6 +146,12 @@ func TestEvaluateStatusAvailability(t *testing.T) {
 		{name: "two tikv nodes down",
 			groups: []groupRollout{convergedGroup("pd", 3), ready(convergedGroup("tikv", 5), 3), convergedGroup("tidb", 2)},
 			want:   controller.AvailabilityUnknown, wantReason: reasonTiKVNodesDown},
+		{name: "new tikv nodes joining hold no data yet",
+			groups: []groupRollout{convergedGroup("pd", 3), joining(convergedGroup("tikv", 1), 4), convergedGroup("tidb", 2)},
+			want:   controller.Available},
+		{name: "new pd members joining",
+			groups: []groupRollout{joining(convergedGroup("pd", 1), 3), convergedGroup("tikv", 3), convergedGroup("tidb", 2)},
+			want:   controller.Available},
 		{name: "single node cluster",
 			groups: []groupRollout{convergedGroup("pd", 1), convergedGroup("tikv", 1), convergedGroup("tidb", 1)},
 			want:   controller.Available},

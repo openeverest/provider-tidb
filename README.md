@@ -426,8 +426,8 @@ The provider reports facts about the TiDB cluster; OpenEverest derives the Insta
 - **`Ready`** once every component group runs the replicas and version asked for. Until then its
   message lists what is waited for, e.g. `tikv (2/3 ready: <operator reason>)`.
 - **`Available`** while clients can connect: the SQL tier they connect to (TiProxy when it's on,
-  otherwise TiDB) has a ready pod, PD has quorum and at most one TiKV node is down, so it stays
-  `True` through a rolling restart. With more TiKV nodes down it is `Unknown`: whether every Region
+  otherwise TiDB) has a ready pod, PD has a quorum of its members and at most one TiKV node that
+  holds data is down, so it stays `True` through a rolling restart and while new nodes join. With more TiKV nodes down it is `Unknown`: whether every Region
   keeps a majority of its replicas depends on where PD placed them. The connection Secret is
   published as soon as the Instance is available.
 - **Problems**: a pod stuck in `CrashLoopBackOff` (at kubelet's longest back-off),
