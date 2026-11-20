@@ -1,11 +1,14 @@
-# Validate rejects the scale-in, so the Instance fails and the group keeps its
-# three nodes instead of starting a removal PD would refuse.
+# Validate rejects the scale-in, so the Instance is not Ready (ValidationFailed)
+# and the group keeps its three nodes instead of starting a removal PD would
+# refuse.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
   name: test-instance
 status:
-  phase: Failed
+  (conditions[?type == 'Ready']):
+    - status: "False"
+      reason: ValidationFailed
 ---
 apiVersion: core.pingcap.com/v1alpha1
 kind: TiKVGroup
