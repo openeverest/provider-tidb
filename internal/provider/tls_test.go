@@ -21,31 +21,47 @@ import (
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
-	"github.com/openeverest/provider-tidb/definition/topologies/cluster"
+	"github.com/openeverest/provider-tidb/definition"
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
-// topologyInstance returns the test Instance with the cluster topology and,
-// when params is not nil, its parameters.
-func topologyInstance(t *testing.T, params any) *corev1alpha1.Instance {
+// tlsInstance returns the test Instance with the cluster topology and, when
+// tls is not nil, spec.parameters.tls.
+func tlsInstance(t *testing.T, tls *definition.TLSParameters) *corev1alpha1.Instance {
 	t.Helper()
 	in := testInstance("8.5.2")
 	in.Spec.Topology = &corev1alpha1.TopologySpec{Type: "cluster"}
-	if params != nil {
-		raw, err := json.Marshal(params)
-		if err != nil {
-			t.Fatal(err)
-		}
-		in.Spec.Topology.Parameters = &runtime.RawExtension{Raw: raw}
-	}
+	setTLS(t, in, tls)
 	return in
 }
 
-func tlsTopology(clusterTLS, clientTLS bool) cluster.ClusterTopologyParameters {
-	return cluster.ClusterTopologyParameters{TLS: &cluster.TLS{Cluster: clusterTLS, Client: clientTLS}}
+func setTLS(t *testing.T, in *corev1alpha1.Instance, tls *definition.TLSParameters) {
+	t.Helper()
+	if tls == nil {
+		return
+	}
+	raw, err := json.Marshal(definition.Parameters{TLS: tls})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Spec.Parameters = &runtime.RawExtension{Raw: raw}
 }
 
-func tlsContext(t *testing.T, params any, objs ...client.Object) (*controller.Context, client.Client) {
+func tlsMode(mode definition.TLSMode) *definition.TLSParameters {
+	return &definition.TLSParameters{Mode: mode}
+}
+
+// issueTLS issues the certificates as Sync does for a new Cluster.
+func issueTLS(c *controller.Context, owner *tidbcorev1.Cluster) error {
+	params := tlsParameters(c)
+	source, err := newTLSSource(c, params)
+	if err != nil {
+		return err
+	}
+	return ensureTLSSecrets(c, owner, source, additionalNames(params))
+}
+
+func tlsContext(t *testing.T, tls *definition.TLSParameters, objs ...client.Object) (*controller.Context, client.Client) {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	for _, install := range []func(*runtime.Scheme) error{corev1alpha1.AddToScheme, tidbcorev1.Install, corev1.AddToScheme} {
@@ -54,7 +70,7 @@ func tlsContext(t *testing.T, params any, objs ...client.Object) (*controller.Co
 		}
 	}
 	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
-	return controller.NewContext(context.Background(), cl, topologyInstance(t, params), common.ProviderName), cl
+	return controller.NewContext(context.Background(), cl, tlsInstance(t, tls), common.ProviderName), cl
 }
 
 func testCluster() *tidbcorev1.Cluster {
@@ -75,10 +91,10 @@ func parseCert(t *testing.T, data []byte) *x509.Certificate {
 }
 
 func TestEnsureTLSSecrets(t *testing.T) {
-	c, cl := tlsContext(t, tlsTopology(true, true))
+	c, cl := tlsContext(t, tlsMode(definition.TLSModePrefer))
 	owner := testCluster()
 
-	if err := ensureTLSSecrets(c, owner); err != nil {
+	if err := issueTLS(c, owner); err != nil {
 		t.Fatalf("ensureTLSSecrets: %v", err)
 	}
 
@@ -138,7 +154,7 @@ func TestEnsureTLSSecrets(t *testing.T) {
 
 	// A second pass issues nothing new.
 	before := mustSecret(t, cl, "orders-tikv-cluster-secret").Data["tls.crt"]
-	if err := ensureTLSSecrets(c, owner); err != nil {
+	if err := issueTLS(c, owner); err != nil {
 		t.Fatalf("second ensureTLSSecrets: %v", err)
 	}
 	if after := mustSecret(t, cl, "orders-tikv-cluster-secret").Data["tls.crt"]; string(after) != string(before) {
@@ -156,23 +172,22 @@ func mustSecret(t *testing.T, cl client.Client, name string) *corev1.Secret {
 }
 
 func TestEnsureTLSSecretsSelection(t *testing.T) {
+	all := []string{"orders-cluster-client-secret", "orders-pd-cluster-secret", "orders-tidb-cluster-secret",
+		"orders-tidb-server-secret", "orders-tiflash-cluster-secret", "orders-tikv-cluster-secret", "orders-tls-ca"}
 	tests := []struct {
 		name       string
-		params     any
+		tls        *definition.TLSParameters
 		wantSecret []string
 	}{
-		{name: "no parameters", params: nil},
-		{name: "both off", params: tlsTopology(false, false)},
-		{name: "client only", params: tlsTopology(false, true),
-			wantSecret: []string{"orders-tidb-server-secret", "orders-tls-ca"}},
-		{name: "cluster only", params: tlsTopology(true, false),
-			wantSecret: []string{"orders-cluster-client-secret", "orders-pd-cluster-secret", "orders-tidb-cluster-secret",
-				"orders-tiflash-cluster-secret", "orders-tikv-cluster-secret", "orders-tls-ca"}},
+		{name: "no parameters", tls: nil},
+		{name: "disabled", tls: tlsMode(definition.TLSModeDisabled)},
+		{name: "preferTLS", tls: tlsMode(definition.TLSModePrefer), wantSecret: all},
+		{name: "requireTLS", tls: tlsMode(definition.TLSModeRequire), wantSecret: all},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, cl := tlsContext(t, tt.params)
-			if err := ensureTLSSecrets(c, testCluster()); err != nil {
+			c, cl := tlsContext(t, tt.tls)
+			if err := issueTLS(c, testCluster()); err != nil {
 				t.Fatal(err)
 			}
 			list := &corev1.SecretList{}
@@ -193,9 +208,9 @@ func TestEnsureTLSSecretsSelection(t *testing.T) {
 
 func TestEnsureTLSSecretsKeepsIssuedCertificates(t *testing.T) {
 	issued := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "orders-pd-cluster-secret", Namespace: testNamespace}}
-	c, _ := tlsContext(t, tlsTopology(true, false), issued)
+	c, _ := tlsContext(t, tlsMode(definition.TLSModePrefer), issued)
 
-	err := ensureTLSSecrets(c, testCluster())
+	err := issueTLS(c, testCluster())
 	if err == nil || !strings.Contains(err.Error(), `CA secret "orders-tls-ca" is missing but certificate secret "orders-pd-cluster-secret" exists`) {
 		t.Errorf("error = %v, want the missing CA reported instead of a new CA", err)
 	}
@@ -204,15 +219,16 @@ func TestEnsureTLSSecretsKeepsIssuedCertificates(t *testing.T) {
 func TestSyncTLSFields(t *testing.T) {
 	tests := []struct {
 		name        string
-		params      any
+		tls         *definition.TLSParameters
 		existing    *tidbcorev1.Cluster
 		wantCluster bool
 		wantClient  bool
 	}{
-		{name: "plaintext", params: nil},
-		{name: "both on", params: tlsTopology(true, true), wantCluster: true, wantClient: true},
-		{name: "client only", params: tlsTopology(false, true), wantClient: true},
-		{name: "existing cluster keeps its setting", params: tlsTopology(false, false),
+		{name: "plaintext", tls: nil},
+		{name: "disabled", tls: tlsMode(definition.TLSModeDisabled)},
+		{name: "preferTLS", tls: tlsMode(definition.TLSModePrefer), wantCluster: true, wantClient: true},
+		{name: "requireTLS", tls: tlsMode(definition.TLSModeRequire), wantCluster: true, wantClient: true},
+		{name: "existing cluster keeps its setting", tls: tlsMode(definition.TLSModeDisabled),
 			existing: func() *tidbcorev1.Cluster {
 				cl := testCluster()
 				cl.Spec.TLSCluster = &tidbcorev1.TLSCluster{Enabled: true}
@@ -225,7 +241,7 @@ func TestSyncTLSFields(t *testing.T) {
 			if tt.existing != nil {
 				objs = append(objs, tt.existing)
 			}
-			c, _ := tlsContext(t, tt.params, objs...)
+			c, _ := tlsContext(t, tt.tls, objs...)
 			built, err := buildCluster(c)
 			if err != nil {
 				t.Fatal(err)
@@ -243,40 +259,48 @@ func TestSyncTLSFields(t *testing.T) {
 }
 
 func TestValidateTiDBTLSImmutable(t *testing.T) {
-	clusterWith := func(enabled bool) client.Object {
+	clusterWith := func(enabled bool, source string) client.Object {
 		cl := testCluster()
 		if enabled {
 			cl.Spec.TLSCluster = &tidbcorev1.TLSCluster{Enabled: true}
 		}
+		if source != "" {
+			cl.Annotations = map[string]string{tlsSourceAnnotation: source}
+		}
 		return cl
 	}
-	tidbWith := func(enabled bool) client.Object {
-		g := &tidbcorev1.TiDBGroup{ObjectMeta: metav1.ObjectMeta{Name: "orders", Namespace: testNamespace}}
-		g.Spec.Template.Spec.Version = testVersion
-		if enabled {
-			g.Spec.Template.Spec.Security = &tidbcorev1.TiDBSecurity{TLS: &tidbcorev1.TiDBTLS{MySQL: &tidbcorev1.TLS{Enabled: true}}}
-		}
-		return g
-	}
+	// A cluster created by provider versions up to 0.3 with only client TLS.
+	clientOnly := &tidbcorev1.TiDBGroup{ObjectMeta: metav1.ObjectMeta{Name: "orders", Namespace: testNamespace}}
+	clientOnly.Spec.Template.Spec.Version = testVersion
+	clientOnly.Spec.Template.Spec.Security = &tidbcorev1.TiDBSecurity{TLS: &tidbcorev1.TiDBTLS{MySQL: &tidbcorev1.TLS{Enabled: true}}}
+	corp := &definition.TLSParameters{Mode: definition.TLSModePrefer, Issuer: &definition.IssuerReference{Name: "corp"}}
 	tests := []struct {
 		name    string
-		params  any
+		tls     *definition.TLSParameters
 		objs    []client.Object
 		wantErr string
 	}{
-		{name: "new instance", params: tlsTopology(true, true)},
-		{name: "unchanged", params: tlsTopology(true, true), objs: []client.Object{clusterWith(true), tidbWith(true)}},
-		{name: "existing plaintext instance without the field", params: nil, objs: []client.Object{clusterWith(false), tidbWith(false)}},
-		{name: "turning cluster tls on", params: tlsTopology(true, false), objs: []client.Object{clusterWith(false), tidbWith(false)},
-			wantErr: "tls.cluster cannot be changed after the Instance is created: it is off"},
-		{name: "turning cluster tls off", params: tlsTopology(false, true), objs: []client.Object{clusterWith(true), tidbWith(true)},
-			wantErr: "tls.cluster cannot be changed after the Instance is created: it is on"},
-		{name: "turning client tls off", params: tlsTopology(true, false), objs: []client.Object{clusterWith(true), tidbWith(true)},
-			wantErr: "tls.client cannot be changed after the Instance is created: it is on"},
+		{name: "new instance", tls: tlsMode(definition.TLSModePrefer)},
+		{name: "unchanged", tls: tlsMode(definition.TLSModePrefer), objs: []client.Object{clusterWith(true, "provider")}},
+		{name: "preferTLS to requireTLS", tls: tlsMode(definition.TLSModeRequire), objs: []client.Object{clusterWith(true, "provider")}},
+		{name: "existing plaintext instance without the field", tls: nil, objs: []client.Object{clusterWith(false, "")}},
+		{name: "turning TLS on", tls: tlsMode(definition.TLSModePrefer), objs: []client.Object{clusterWith(false, "")},
+			wantErr: "mode can't switch between disabled and TLS after the Instance is created: TLS is off"},
+		{name: "turning TLS off", tls: tlsMode(definition.TLSModeDisabled), objs: []client.Object{clusterWith(true, "provider")},
+			wantErr: "mode can't switch between disabled and TLS after the Instance is created: TLS is on"},
+		{name: "client-only cluster turns client TLS off", tls: tlsMode(definition.TLSModeDisabled),
+			objs: []client.Object{clusterWith(false, ""), clientOnly}},
+		{name: "managed to issuer", tls: corp, objs: []client.Object{clusterWith(true, "cert-manager")},
+			wantErr: "issuer can't change after the Instance is created: the certificates come from cert-manager"},
+		{name: "cluster from before the source was recorded", tls: corp, objs: []client.Object{clusterWith(true, "")},
+			wantErr: "the certificates come from provider"},
+		{name: "same issuer", tls: corp, objs: []client.Object{clusterWith(true, "cert-manager:Issuer/corp")}},
+		{name: "issuer removed", tls: tlsMode(definition.TLSModePrefer), objs: []client.Object{clusterWith(true, "cert-manager:Issuer/corp")},
+			wantErr: "the certificates come from cert-manager:Issuer/corp"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, _ := tlsContext(t, tt.params, append([]client.Object{testProvider()}, tt.objs...)...)
+			c, _ := tlsContext(t, tt.tls, append([]client.Object{testProvider()}, tt.objs...)...)
 			assertError(t, validateAll(c), tt.wantErr)
 		})
 	}
@@ -284,8 +308,12 @@ func TestValidateTiDBTLSImmutable(t *testing.T) {
 
 func TestConnectionDetailsCarryTheCA(t *testing.T) {
 	for _, clientTLS := range []bool{false, true} {
-		c, _ := tlsContext(t, tlsTopology(true, clientTLS))
-		if err := ensureTLSSecrets(c, testCluster()); err != nil {
+		mode := definition.TLSModeDisabled
+		if clientTLS {
+			mode = definition.TLSModePrefer
+		}
+		c, _ := tlsContext(t, tlsMode(mode))
+		if err := issueTLS(c, testCluster()); err != nil {
 			t.Fatal(err)
 		}
 		ca := connectionDetails(c).AdditionalProperties[tlsKeyCA]

@@ -5,22 +5,26 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/big"
 	"net"
+	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
-	"github.com/openeverest/provider-tidb/definition/topologies/cluster"
+	"github.com/openeverest/provider-tidb/definition"
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
@@ -45,13 +49,47 @@ const (
 	tlsClusterCN = "TiDB"
 )
 
-// tlsSettings returns the Instance's TLS choices; absent means plaintext.
-func tlsSettings(c *controller.Context) cluster.TLS {
-	var params cluster.ClusterTopologyParameters
-	if !c.TryDecodeTopologyParameters(&params) || params.TLS == nil {
-		return cluster.TLS{}
+// tlsParameters returns spec.parameters.tls; absent means disabled. Validate
+// rejects parameters that don't decode, so here they read as disabled.
+func tlsParameters(c *controller.Context) definition.TLSParameters {
+	params, _ := decodeTLSParameters(c.Instance())
+	return params
+}
+
+func decodeTLSParameters(instance *corev1alpha1.Instance) (definition.TLSParameters, error) {
+	if instance == nil || instance.Spec.Parameters == nil || len(instance.Spec.Parameters.Raw) == 0 {
+		return definition.TLSParameters{}, nil
 	}
-	return *params.TLS
+	var params definition.Parameters
+	if err := json.Unmarshal(instance.Spec.Parameters.Raw, &params); err != nil {
+		return definition.TLSParameters{}, err
+	}
+	if params.TLS == nil {
+		return definition.TLSParameters{}, nil
+	}
+	// The UI sends an issuer without a name when its field is left empty.
+	if ref := params.TLS.Issuer; ref != nil && *ref == (definition.IssuerReference{}) {
+		params.TLS.Issuer = nil
+	}
+	return *params.TLS, nil
+}
+
+// tlsEnabled reports whether the mode turns TLS on. Both preferTLS and
+// requireTLS turn on mutual TLS between the components and TLS for MySQL
+// clients of TiDB and TiProxy; requireTLS also refuses plaintext clients.
+func tlsEnabled(params definition.TLSParameters) bool {
+	return params.Mode == definition.TLSModePrefer || params.Mode == definition.TLSModeRequire
+}
+
+// additionalNames returns the names sorted and without duplicates, so their
+// order in the Instance doesn't reissue certificates or restart TiDB.
+func additionalNames(params definition.TLSParameters) []string {
+	if !tlsEnabled(params) || len(params.AdditionalNames) == 0 {
+		return nil
+	}
+	names := slices.Clone(params.AdditionalNames)
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 func tlsCASecretName(instance string) string {
@@ -84,62 +122,73 @@ func tiproxyBackendTLSSecretName(instance string) string {
 }
 
 // leafCert describes one certificate the provider issues into a Secret.
+// followsNames marks the MySQL server certificates, which carry the
+// additional names and are reissued when those change.
 type leafCert struct {
-	secretName string
-	commonName string
-	dnsNames   []string
-	usages     []x509.ExtKeyUsage
+	secretName   string
+	commonName   string
+	dnsNames     []string
+	usages       []x509.ExtKeyUsage
+	followsNames bool
 }
 
-// tlsLeaves lists the certificates the Instance's TLS settings need. TiProxy's
+// tlsLeaves lists the certificates TLS needs: cluster certificates for every
+// component group, the operator's (and BR's) client certificate, and the MySQL
+// server certificates of TiDB and TiProxy with the additional names. TiProxy's
 // are only issued while it is enabled.
-func tlsLeaves(instance, namespace string, settings cluster.TLS, tiproxy bool) []leafCert {
+func tlsLeaves(instance, namespace string, enabled bool, names []string, tiproxy bool) []leafCert {
+	if !enabled {
+		return nil
+	}
 	var leaves []leafCert
-	if settings.Cluster {
-		components := []string{common.ComponentPD, common.ComponentTiKV, common.ComponentTiDB, common.ComponentTiFlash}
-		if tiproxy {
-			components = append(components, common.ComponentTiProxy)
-		}
-		for _, component := range components {
-			svc := instance + "-" + component
-			leaves = append(leaves, leafCert{
-				secretName: clusterTLSSecretName(instance, component),
-				commonName: tlsClusterCN,
-				dnsNames:   append(serviceDNSNames(svc, namespace), peerDNSNames(svc+"-peer", namespace)...),
-				usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-			})
-		}
+	components := []string{common.ComponentPD, common.ComponentTiKV, common.ComponentTiDB, common.ComponentTiFlash}
+	if tiproxy {
+		components = append(components, common.ComponentTiProxy)
+	}
+	for _, component := range components {
+		svc := instance + "-" + component
 		leaves = append(leaves, leafCert{
-			secretName: clusterClientTLSSecretName(instance),
+			secretName: clusterTLSSecretName(instance, component),
 			commonName: tlsClusterCN,
-			usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+			dnsNames:   append(serviceDNSNames(svc, namespace), peerDNSNames(svc+"-peer", namespace)...),
+			usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		})
 	}
-	if settings.Client {
-		svc := instance + "-" + common.ComponentTiDB
-		leaves = append(leaves, leafCert{
-			secretName: mysqlServerTLSSecretName(instance),
-			commonName: svc,
-			dnsNames:   append(serviceDNSNames(svc, namespace), peerDNSNames(svc+"-peer", namespace)...),
-			usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		})
-		if tiproxy {
-			proxy := instance + "-" + common.ComponentTiProxy
-			leaves = append(leaves,
-				leafCert{
-					secretName: tiproxyServerTLSSecretName(instance),
-					commonName: proxy,
-					dnsNames:   append(serviceDNSNames(proxy, namespace), peerDNSNames(proxy+"-peer", namespace)...),
-					usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-				},
-				leafCert{
-					secretName: tiproxyBackendTLSSecretName(instance),
-					commonName: proxy,
-					usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-				})
-		}
+	leaves = append(leaves, leafCert{
+		secretName: clusterClientTLSSecretName(instance),
+		commonName: tlsClusterCN,
+		usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	})
+	svc := instance + "-" + common.ComponentTiDB
+	leaves = append(leaves, leafCert{
+		secretName:   mysqlServerTLSSecretName(instance),
+		commonName:   svc,
+		dnsNames:     mysqlServerDNSNames(svc, namespace, names),
+		usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		followsNames: true,
+	})
+	if tiproxy {
+		proxy := instance + "-" + common.ComponentTiProxy
+		leaves = append(leaves,
+			leafCert{
+				secretName:   tiproxyServerTLSSecretName(instance),
+				commonName:   proxy,
+				dnsNames:     mysqlServerDNSNames(proxy, namespace, names),
+				usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+				followsNames: true,
+			},
+			leafCert{
+				secretName: tiproxyBackendTLSSecretName(instance),
+				commonName: proxy,
+				usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+			})
 	}
 	return leaves
+}
+
+func mysqlServerDNSNames(svc, namespace string, additional []string) []string {
+	names := append(serviceDNSNames(svc, namespace), peerDNSNames(svc+"-peer", namespace)...)
+	return append(names, additional...)
 }
 
 func serviceDNSNames(svc, namespace string) []string {
@@ -155,22 +204,24 @@ func peerDNSNames(svc, namespace string) []string {
 	return names
 }
 
-// ensureTLSSecrets creates the CA and every certificate the TLS settings and
-// TiProxy's session migration need, owned by the Cluster so they outlive the
-// pods during the operator's ordered teardown. Existing Secrets are never
-// replaced: certificates are issued once.
-func ensureTLSSecrets(c *controller.Context, owner *tidbcorev1.Cluster) error {
-	settings := tlsSettings(c)
+// ensureTLSSecrets creates the CA and every certificate TLS and TiProxy's
+// session migration need, owned by the Cluster so they outlive the pods during
+// the operator's ordered teardown. source is where the certificates come from,
+// as recorded on the Cluster, and names the additional names applied so far.
+// Certificates are issued once; only the MySQL server certificates are
+// reissued, when the additional names change.
+func ensureTLSSecrets(c *controller.Context, owner *tidbcorev1.Cluster, source string, names []string) error {
+	params := tlsParameters(c)
 	_, tiproxy := enabledTiProxy(c.Instance().Spec.Components)
-	leaves := tlsLeaves(c.Name(), c.Namespace(), settings, tiproxy)
+	leaves := tlsLeaves(c.Name(), c.Namespace(), tlsEnabled(params), names, tiproxy)
 	if usesSessionTokenSigning(c, owner) {
 		leaves = append(leaves, sessionTokenSigningLeaf(c.Name()))
 	}
 	if len(leaves) == 0 {
 		return nil
 	}
-	if usesCertManager(settings) {
-		return ensureCertManagerCertificates(c, owner, settings, leaves)
+	if strings.HasPrefix(source, tlsSourceCertMgr) {
+		return ensureCertManagerCertificates(c, owner, params.Issuer, leaves)
 	}
 
 	ca, err := ensureCA(c, owner, leaves)
@@ -182,23 +233,53 @@ func ensureTLSSecrets(c *controller.Context, owner *tidbcorev1.Cluster) error {
 		if err != nil {
 			return err
 		}
-		if existing != nil {
+		if existing != nil && (!leaf.followsNames || certHasDNSNames(existing.Data[tlsKeyCert], leaf.dnsNames)) {
 			continue
 		}
 		certPEM, keyPEM, err := ca.issue(leaf)
 		if err != nil {
 			return fmt.Errorf("issue certificate for %q: %w", leaf.secretName, err)
 		}
+		data := map[string][]byte{tlsKeyCA: ca.certPEM, tlsKeyCert: certPEM, tlsKeyKey: keyPEM}
+		if existing != nil {
+			existing.Data = data
+			if err := c.Client().Update(c.Context(), existing); err != nil {
+				return fmt.Errorf("reissue certificate %q: %w", leaf.secretName, err)
+			}
+			continue
+		}
 		secret := &corev1.Secret{
 			ObjectMeta: c.ObjectMeta(leaf.secretName),
 			Type:       corev1.SecretTypeTLS,
-			Data:       map[string][]byte{tlsKeyCA: ca.certPEM, tlsKeyCert: certPEM, tlsKeyKey: keyPEM},
+			Data:       data,
 		}
 		if err := createOwnedByCluster(c, owner, secret); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// certHasDNSNames reports whether the PEM certificate is valid for exactly
+// the names, in any order.
+func certHasDNSNames(certPEM []byte, names []string) bool {
+	cert, err := parseCertificate(certPEM)
+	if err != nil {
+		return false
+	}
+	have := slices.Clone(cert.DNSNames)
+	want := slices.Clone(names)
+	slices.Sort(have)
+	slices.Sort(want)
+	return slices.Equal(have, want)
+}
+
+func parseCertificate(certPEM []byte) (*x509.Certificate, error) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, errors.New("no PEM certificate")
+	}
+	return x509.ParseCertificate(block.Bytes)
 }
 
 // ensureCA reads the Instance's CA, generating it on first use. A missing CA
@@ -310,11 +391,7 @@ func newCertAuthority(instance string) (*certAuthority, error) {
 }
 
 func parseCertAuthority(certPEM, keyPEM []byte) (*certAuthority, error) {
-	certBlock, _ := pem.Decode(certPEM)
-	if certBlock == nil {
-		return nil, errors.New("no PEM certificate")
-	}
-	cert, err := x509.ParseCertificate(certBlock.Bytes)
+	cert, err := parseCertificate(certPEM)
 	if err != nil {
 		return nil, fmt.Errorf("parse certificate: %w", err)
 	}
@@ -370,43 +447,37 @@ func pemEncode(blockType string, der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: blockType, Bytes: der})
 }
 
-// validateTLS checks that cert-manager is installed when it is asked for, and
-// rejects changing the TLS settings of an existing cluster: the operator only
-// takes them when the cluster is created.
+// validateTLS checks what the cluster must provide or can't change: an issuer
+// needs cert-manager, the operator takes the cluster TLS setting only when the
+// Cluster is created, and a new CA would not verify the certificates the pods
+// already use.
 func validateTLS(c *controller.Context) error {
-	requested := tlsSettings(c)
-	if err := validateCertManagerCRD(c, requested); err != nil {
-		return err
-	}
-
+	params := tlsParameters(c)
 	cluster := &tidbcorev1.Cluster{}
 	found, err := c.Exists(cluster, c.Name())
 	if err != nil {
 		return fmt.Errorf("get cluster: %w", err)
 	}
-	if found {
-		current := cluster.Spec.TLSCluster != nil && cluster.Spec.TLSCluster.Enabled
-		if requested.Cluster != current {
-			return fmt.Errorf("tls.cluster cannot be changed after the Instance is created: it is %s", onOff(current))
+	if !found {
+		if params.Issuer != nil {
+			return validateCertManagerCRD(c)
 		}
-		// A new CA would not verify the certificates the pods already use.
-		currentSource := currentTLSSource(cluster, current || requested.Client)
-		if want := tlsSource(requested); want != "" && currentSource != "" && want != currentSource {
-			return fmt.Errorf("the TLS certificate source cannot be changed after the Instance is created: it is %s", currentSource)
-		}
+		return nil
 	}
-
-	tidb := &tidbcorev1.TiDBGroup{}
-	found, err = c.Exists(tidb, c.Name())
-	if err != nil {
-		return fmt.Errorf("get tidb group: %w", err)
+	current := cluster.Spec.TLSCluster != nil && cluster.Spec.TLSCluster.Enabled
+	if requested := tlsEnabled(params); requested != current {
+		return fmt.Errorf("mode can't switch between disabled and TLS after the Instance is created: TLS is %s", onOff(current))
 	}
-	if found {
-		sec := tidb.Spec.Template.Spec.Security
-		current := sec != nil && sec.TLS != nil && sec.TLS.MySQL != nil && sec.TLS.MySQL.Enabled
-		if requested.Client != current {
-			return fmt.Errorf("tls.client cannot be changed after the Instance is created: it is %s", onOff(current))
-		}
+	if !current {
+		return nil
+	}
+	source := currentTLSSource(cluster)
+	want := ""
+	if params.Issuer != nil {
+		want = issuerSource(*params.Issuer)
+	}
+	if issued := strings.HasPrefix(source, tlsSourceCertMgr+":"); want != source && (want != "" || issued) {
+		return fmt.Errorf("issuer can't change after the Instance is created: the certificates come from %s", source)
 	}
 	return nil
 }

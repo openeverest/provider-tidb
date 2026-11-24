@@ -1,18 +1,19 @@
-# The change is checked against the live Cluster, so admission only warns and
-# the reconciler blocks it: the Cluster keeps TLS on.
+# The Instance keeps TLS on, with the certificates cert-manager issues.
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
   name: test-instance
-status:
-  (conditions[?type == 'Ready']):
-    - status: "False"
-      reason: InvalidReference
+spec:
+  parameters:
+    tls:
+      mode: preferTLS
 ---
 apiVersion: core.pingcap.com/v1alpha1
 kind: Cluster
 metadata:
   name: test-instance
+  annotations:
+    tidb.openeverest.io/tls-certificates: cert-manager
 spec:
   tlsCluster:
     enabled: true

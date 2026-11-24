@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -86,7 +87,8 @@ func SyncTiDB(c *controller.Context) error {
 	}
 
 	// The pods mount the certificates, so they must exist before the groups.
-	if err := ensureTLSSecrets(c, owner); err != nil {
+	tlsNames := splitNames(cluster.Annotations[tlsNamesAnnotation])
+	if err := ensureTLSSecrets(c, owner, cluster.Annotations[tlsSourceAnnotation], tlsNames); err != nil {
 		return err
 	}
 
@@ -111,6 +113,10 @@ func SyncTiDB(c *controller.Context) error {
 	if err := addTiDBGracefulWait(c, tidbGroup, cluster, hadSessionTokenSigning); err != nil {
 		return err
 	}
+	tlsNamesPending, err := addTLSNamesRestart(c, tidbGroup, tlsNames)
+	if err != nil {
+		return err
+	}
 	if err := applyOwnedByCluster(c, owner, tidbGroup); err != nil {
 		return err
 	}
@@ -128,6 +134,12 @@ func SyncTiDB(c *controller.Context) error {
 	}
 	if err := syncLogBackup(c); err != nil {
 		return err
+	}
+	if err := syncRequireSecureTransport(c, owner); err != nil {
+		return err
+	}
+	if tlsNamesPending {
+		return controller.WaitFor("waiting for cert-manager to reissue TiDB's MySQL certificate with the additional names")
 	}
 	// Checked last: the error only flags the backup configuration, so the engine is fully synced first.
 	return validateBackupSchedules(c.Instance().Spec.Backup)
@@ -366,6 +378,8 @@ func buildCluster(c *controller.Context) (*tidbcorev1.Cluster, error) {
 		ObjectMeta: c.ObjectMeta(c.Name()),
 		Spec:       tidbcorev1.ClusterSpec{},
 	}
+	params := tlsParameters(c)
+	annotations := map[string]string{}
 	// bootstrapSQL is immutable after creation: set it only for a new Cluster,
 	// otherwise echo back the value the Cluster was created with.
 	// tlsCluster is immutable too: echo it back as well.
@@ -374,26 +388,37 @@ func buildCluster(c *controller.Context) (*tidbcorev1.Cluster, error) {
 	switch {
 	case apierrors.IsNotFound(err):
 		cluster.Spec.BootstrapSQL = &corev1.LocalObjectReference{Name: bootstrapConfigMapName(c.Name())}
-		settings := tlsSettings(c)
-		if settings.Cluster {
+		if tlsEnabled(params) {
 			cluster.Spec.TLSCluster = &tidbcorev1.TLSCluster{Enabled: true}
 		}
-		if source := tlsSource(settings); source != "" {
-			cluster.Annotations = map[string]string{tlsSourceAnnotation: source}
+		if annotations[tlsSourceAnnotation], err = newTLSSource(c, params); err != nil {
+			return nil, err
 		}
+		annotations[tlsNamesAnnotation] = strings.Join(additionalNames(params), ",")
 		cluster.Spec.FeatureGates, cluster.Spec.Security = newClusterSessionTokenSigning(c)
 	case err != nil:
 		return nil, err
 	default:
 		cluster.Spec.BootstrapSQL = existing.Spec.BootstrapSQL
 		cluster.Spec.TLSCluster = existing.Spec.TLSCluster
-		if source := existing.Annotations[tlsSourceAnnotation]; source != "" {
-			cluster.Annotations = map[string]string{tlsSourceAnnotation: source}
+		if existing.Spec.TLSCluster != nil && existing.Spec.TLSCluster.Enabled {
+			annotations[tlsSourceAnnotation] = currentTLSSource(existing)
 		}
+		names, err := appliedAdditionalNames(c, existing, params)
+		if err != nil {
+			return nil, err
+		}
+		annotations[tlsNamesAnnotation] = strings.Join(names, ",")
+		// Set by syncRequireSecureTransport once TiDB took it.
+		annotations[requireSecureTransportAnnotation] = existing.Annotations[requireSecureTransportAnnotation]
 		// Feature gates are frozen once set, so they change in steps (session_token.go).
 		if cluster.Spec.FeatureGates, cluster.Spec.Security, err = existingClusterSessionTokenSigning(c, existing); err != nil {
 			return nil, err
 		}
+	}
+	maps.DeleteFunc(annotations, func(_, value string) bool { return value == "" })
+	if len(annotations) > 0 {
+		cluster.Annotations = annotations
 	}
 	return cluster, nil
 }
@@ -461,7 +486,7 @@ func buildTiDBGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, imag
 	if cfg := componentConfig(c, comp); cfg != "" {
 		tmpl.Config = tidbcorev1.ConfigFile(cfg)
 	}
-	if tlsSettings(c).Client {
+	if tlsEnabled(tlsParameters(c)) {
 		tmpl.Security = &tidbcorev1.TiDBSecurity{TLS: &tidbcorev1.TiDBTLS{MySQL: &tidbcorev1.TLS{Enabled: true}}}
 	}
 	return &tidbcorev1.TiDBGroup{
@@ -509,9 +534,9 @@ func buildTiProxyGroup(c *controller.Context, comp corev1alpha1.ComponentSpec, i
 	}
 	cfg := componentConfig(c, comp)
 	// TiProxy serves MySQL clients with its own certificate and reaches TiDB's
-	// MySQL port over TLS too; tls.cluster needs nothing here, the operator
-	// mounts <group>-tiproxy-cluster-secret by itself.
-	if tlsSettings(c).Client {
+	// MySQL port over TLS too; the cluster certificate needs nothing here, the
+	// operator mounts <group>-tiproxy-cluster-secret by itself.
+	if tlsEnabled(tlsParameters(c)) {
 		tmpl.Security = &tidbcorev1.TiProxySecurity{TLS: &tidbcorev1.TiProxyTLS{
 			MySQL:   &tidbcorev1.TLS{Enabled: true},
 			Backend: &tidbcorev1.ClientTLS{Enabled: true},

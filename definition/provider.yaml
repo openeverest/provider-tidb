@@ -20,6 +20,10 @@ components:
         parametersSchema: TiproxyParameters
 name: tidb
 
+# Instance-wide parameters (Instance.spec.parameters), a Go type in
+# definition/types.go.
+parametersSchema: Parameters
+
 # Component types: the kind of the software each type runs, published as
 # Provider.spec.componentTypes.<type>.kind and matched by monitoring classes:
 # TiDB and TiKV by their own names, the components that exist only inside a

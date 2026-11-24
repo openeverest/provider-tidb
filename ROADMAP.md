@@ -150,9 +150,10 @@ Ordered by value/effort; each phase is independently shippable.
   of every component published in `status.monitoring.sources`, with the cluster client
   certificate under mTLS, and scraped by the extension of each `MonitoringDestination` in
   `spec.monitoring.destinations` (done).
-- **TLS:** cluster-internal mTLS (`Cluster.spec.tlsCluster`) and client TLS for TiDB (MySQL),
-  with provider-issued certificates (or cert-manager, optionally with your own issuer), on by
-  default in the UI (done). Next: certificate rotation.
+- **TLS:** cluster-internal mTLS (`Cluster.spec.tlsCluster`) and client TLS for TiDB (MySQL) in
+  the common `spec.parameters.tls` shape (`disabled`, `preferTLS`, `requireTLS`), with certificates
+  from cert-manager (optionally your own issuer) or the provider, extra DNS names, on by default in
+  the UI (done). Next: certificate rotation.
 - **Security Enhanced Mode**, auth-token config surfacing where appropriate.
 
 ### Phase 5 — Advanced topologies & tuning

@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -23,8 +22,6 @@ var _ controller.ReferenceValidator = (*Provider)(nil)
 var (
 	componentsPath = field.NewPath("spec", "components")
 	tikvPath       = componentsPath.Key(common.ComponentTiKV)
-	topologyParams = field.NewPath("spec", "topology", "parameters")
-	tlsPath        = topologyParams.Child("tls")
 )
 
 // Validate checks the rules about the Instance alone. The runtime runs it at
@@ -58,10 +55,8 @@ func (p *Provider) Validate(in controller.ValidationInput) controller.Validation
 	if in.Provider != nil {
 		spec = &in.Provider.Spec
 	}
-	// The checks below only decode the Instance, so the Context has no client.
-	c := controller.NewContext(context.Background(), nil, instance, common.ProviderName)
 	errs = append(errs, invalid(componentsPath, validateVersionSpec(instance, spec))...)
-	errs = append(errs, invalid(tlsPath, validateCertManager(tlsSettings(c)))...)
+	errs = append(errs, validateTLSParameters(instance, in.Old)...)
 	return controller.ValidationResult{Errors: errs}
 }
 

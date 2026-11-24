@@ -1,6 +1,33 @@
-# A second Instance whose certificates cert-manager issues, from a CA the
-# provider sets up in cert-manager. TLS is chosen at creation, so it cannot be
-# switched on the main Instance.
+# A company CA in cert-manager, and a second Instance whose certificates it
+# signs, valid for an extra name clients reach TiDB by. The issuer is chosen at
+# creation, so it cannot be set on the main Instance.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: company-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: company-ca
+spec:
+  isCA: true
+  commonName: company-ca
+  secretName: company-ca
+  issuerRef:
+    name: company-selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: company-ca
+spec:
+  ca:
+    secretName: company-ca
+---
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
@@ -9,14 +36,15 @@ spec:
   providerRef:
     name: tidb
   version: "8.5.8"
+  parameters:
+    tls:
+      mode: preferTLS
+      issuer:
+        name: company-ca
+      additionalNames:
+        - tidb.example.com
   topology:
     type: cluster
-    parameters:
-      tls:
-        cluster: true
-        client: true
-        certManager:
-          enabled: true
   components:
     pd:
       type: pd

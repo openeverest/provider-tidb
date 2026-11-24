@@ -5,6 +5,8 @@ apiVersion: core.pingcap.com/v1alpha1
 kind: Cluster
 metadata:
   name: test-instance
+  annotations:
+    tidb.openeverest.io/tls-certificates: cert-manager
 spec:
   bootstrapSQL:
     name: test-instance-tidb-bootstrap-sql
@@ -91,75 +93,96 @@ kind: ConfigMap
 metadata:
   name: test-instance-tidb-bootstrap-sql
 ---
-# The provider issues the certificates from a CA it generates for the Instance,
-# under the names the operator mounts, owned by the Cluster so they outlive the
-# pods during teardown.
+# cert-manager is installed, so preferTLS issues every certificate through it:
+# one cert-manager Certificate per Secret the operator mounts, signed by a CA
+# Certificate the provider creates for the Instance.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-instance-tls-ca
+spec:
+  secretName: test-instance-tls-ca
+---
 apiVersion: v1
 kind: Secret
 metadata:
   name: test-instance-tls-ca
-  ownerReferences:
-    - apiVersion: core.pingcap.com/v1alpha1
-      kind: Cluster
-      name: test-instance
-type: Opaque
+type: kubernetes.io/tls
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-instance-pd-cluster-secret
+spec:
+  secretName: test-instance-pd-cluster-secret
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: test-instance-pd-cluster-secret
-  ownerReferences:
-    - apiVersion: core.pingcap.com/v1alpha1
-      kind: Cluster
-      name: test-instance
 type: kubernetes.io/tls
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-instance-tikv-cluster-secret
+spec:
+  secretName: test-instance-tikv-cluster-secret
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: test-instance-tikv-cluster-secret
-  ownerReferences:
-    - apiVersion: core.pingcap.com/v1alpha1
-      kind: Cluster
-      name: test-instance
 type: kubernetes.io/tls
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-instance-tidb-cluster-secret
+spec:
+  secretName: test-instance-tidb-cluster-secret
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: test-instance-tidb-cluster-secret
-  ownerReferences:
-    - apiVersion: core.pingcap.com/v1alpha1
-      kind: Cluster
-      name: test-instance
 type: kubernetes.io/tls
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-instance-tiflash-cluster-secret
+spec:
+  secretName: test-instance-tiflash-cluster-secret
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: test-instance-tiflash-cluster-secret
-  ownerReferences:
-    - apiVersion: core.pingcap.com/v1alpha1
-      kind: Cluster
-      name: test-instance
 type: kubernetes.io/tls
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-instance-cluster-client-secret
+spec:
+  secretName: test-instance-cluster-client-secret
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: test-instance-cluster-client-secret
-  ownerReferences:
-    - apiVersion: core.pingcap.com/v1alpha1
-      kind: Cluster
-      name: test-instance
 type: kubernetes.io/tls
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-instance-tidb-server-secret
+spec:
+  secretName: test-instance-tidb-server-secret
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: test-instance-tidb-server-secret
-  ownerReferences:
-    - apiVersion: core.pingcap.com/v1alpha1
-      kind: Cluster
-      name: test-instance
 type: kubernetes.io/tls

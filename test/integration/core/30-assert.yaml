@@ -1,42 +1,17 @@
-# The Cluster records cert-manager as its certificate source. The provider sets
-# up a self-signed issuer, a CA certificate and a CA issuer, and asks cert-manager
-# for every certificate under the Secret names the operator mounts, all owned
-# by the Cluster.
+# The Cluster records the company issuer as its certificate source, and
+# cert-manager issues every certificate from it under the Secret names the
+# operator mounts, owned by the Cluster. The MySQL server certificate also
+# covers the additional name.
 apiVersion: core.pingcap.com/v1alpha1
 kind: Cluster
 metadata:
   name: cm-instance
   annotations:
-    tidb.openeverest.io/tls-certificates: cert-manager
+    tidb.openeverest.io/tls-certificates: cert-manager:Issuer/company-ca
+    tidb.openeverest.io/tls-additional-names: tidb.example.com
 spec:
   tlsCluster:
     enabled: true
----
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: cm-instance-tls-selfsigned
-spec:
-  selfSigned: {}
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: cm-instance-tls-ca
-spec:
-  isCA: true
-  secretName: cm-instance-tls-ca
-  issuerRef:
-    name: cm-instance-tls-selfsigned
-    kind: Issuer
----
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: cm-instance-tls-ca
-spec:
-  ca:
-    secretName: cm-instance-tls-ca
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -55,7 +30,7 @@ spec:
     - server auth
     - client auth
   issuerRef:
-    name: cm-instance-tls-ca
+    name: company-ca
     kind: Issuer
     group: cert-manager.io
 ---
@@ -69,6 +44,8 @@ spec:
     - digital signature
     - key encipherment
     - client auth
+  issuerRef:
+    name: company-ca
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -77,7 +54,17 @@ metadata:
 spec:
   secretName: cm-instance-tidb-server-secret
   commonName: cm-instance-tidb
+  (contains(dnsNames, 'tidb.example.com')): true
   usages:
     - digital signature
     - key encipherment
     - server auth
+  issuerRef:
+    name: company-ca
+---
+# cert-manager issued it, with the company CA for clients to verify TiDB.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cm-instance-tidb-server-secret
+type: kubernetes.io/tls

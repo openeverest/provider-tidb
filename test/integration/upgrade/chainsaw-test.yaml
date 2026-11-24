@@ -126,6 +126,15 @@ spec:
               echo "provider image: $released -> $image"
               [ "$image" != "$released" ]
 
+    # The released provider took TLS under spec.topology.parameters.tls, which
+    # this build rejects; move it to spec.parameters.tls as the README says.
+    - name: migrate-tls-parameters
+      try:
+        - script:
+            content: |
+              kubectl -n $NAMESPACE patch instances.core.openeverest.io test-instance --type merge \
+                -p '{"spec":{"parameters":{"tls":{"mode":"preferTLS"}},"topology":{"parameters":null}}}'
+
     - name: instance-untouched
       try:
         # Give the new provider time to reconcile the Instance; any change it
