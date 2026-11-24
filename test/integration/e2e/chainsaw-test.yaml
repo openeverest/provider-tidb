@@ -107,10 +107,7 @@ spec:
 
     - name: tikv-scale-out
       try:
-        - apply:
-            file: 50-sql-shell.yaml
-        - assert:
-            file: 50-assert.yaml
+        # sql-shell comes from require-tls and lives until the test ends.
         - patch:
             file: 51-scale-out-tikv.yaml
         - assert:
