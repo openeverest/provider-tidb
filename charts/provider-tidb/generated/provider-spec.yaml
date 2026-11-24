@@ -130,6 +130,57 @@ spec:
         metrics: Native
       tiproxy:
         metrics: Native
+  parametersSchema:
+    openAPIV3Schema:
+      description: Parameters defines instance-wide parameters (Instance.spec.parameters).
+      properties:
+        tls:
+          description: |-
+            TLS configures encryption in transit: between PD, TiKV, TiDB, TiFlash and
+            TiProxy, and between MySQL clients and TiDB or TiProxy.
+          properties:
+            additionalNames:
+              description: |-
+                AdditionalNames are DNS names the MySQL certificates of TiDB and TiProxy
+                are valid for besides those of their Services, such as an external name
+                clients connect to. Changing them on a running instance reissues the
+                certificates and restarts TiDB, after maintenance approval.
+              items:
+                type: string
+              type: array
+            issuer:
+              description: |-
+                Issuer is the cert-manager issuer that signs every certificate, instead
+                of a CA created for the instance. It must put its CA into the
+                certificate Secrets (ca.crt), as CA and Vault issuers do. Chosen when
+                the Instance is created.
+              properties:
+                group:
+                  default: cert-manager.io
+                  description: |-
+                    Group is the API group of an external issuer, such as
+                    awspca.cert-manager.io.
+                  type: string
+                kind:
+                  default: Issuer
+                  description: |-
+                    Kind of the issuer: Issuer or ClusterIssuer, or the kind of an external
+                    issuer of group.
+                  type: string
+                name:
+                  description: Name of the issuer.
+                  type: string
+              required:
+                - name
+              type: object
+            mode:
+              default: disabled
+              description: |-
+                Mode is disabled, preferTLS or requireTLS. Only preferTLS and
+                requireTLS can be switched on a running instance.
+              type: string
+          type: object
+      type: object
   release:
     version: 0.3.0
   topologies:
@@ -186,54 +237,6 @@ spec:
                   minimum: 0
                 resources: {}
                 schedulingPolicy: {}
-      parametersSchema:
-        openAPIV3Schema:
-          description: |-
-            ClusterTopologyParameters defines topology-level parameters for the standard
-            distributed TiDB cluster. Per-component settings are expressed through
-            component specs.
-          properties:
-            tls:
-              description: |-
-                TLS configures encryption. Both settings are chosen when the Instance is
-                created and cannot be changed afterwards.
-              properties:
-                certManager:
-                  description: |-
-                    CertManager issues the certificates with cert-manager. Chosen when the
-                    Instance is created, like the settings above.
-                  properties:
-                    enabled:
-                      description: |-
-                        Enabled issues the certificates with cert-manager. Without IssuerRef the
-                        provider sets up a self-signed CA in cert-manager for the Instance.
-                      type: boolean
-                    issuerRef:
-                      description: |-
-                        IssuerRef names the Issuer (in the Instance's namespace) or ClusterIssuer
-                        that signs the certificates; setting it implies Enabled. It must put the
-                        CA into the certificate Secrets (ca.crt), as CA and Vault issuers do.
-                      properties:
-                        kind:
-                          description: Kind is Issuer (default) or ClusterIssuer.
-                          type: string
-                        name:
-                          description: Name of the Issuer or ClusterIssuer.
-                          type: string
-                      type: object
-                  type: object
-                client:
-                  description: |-
-                    Client lets MySQL clients connect to TiDB and TiProxy over TLS; TiProxy
-                    then reaches TiDB over TLS too.
-                  type: boolean
-                cluster:
-                  description: |-
-                    Cluster encrypts and mutually authenticates the traffic between PD, TiKV,
-                    TiDB, TiFlash and TiProxy.
-                  type: boolean
-              type: object
-          type: object
   uiSchema:
     cluster:
       sections:
@@ -389,66 +392,65 @@ spec:
           label: Placement Driver (PD)
         security:
           components:
-            certManager:
+            issuer:
+              components:
+                issuerKind:
+                  fieldParams:
+                    helperText: Issuer when not set
+                    label: Issuer kind
+                    modes:
+                      edit:
+                        disabled: true
+                    options:
+                      - label: Issuer
+                        value: Issuer
+                      - label: ClusterIssuer
+                        value: ClusterIssuer
+                  path: spec.parameters.tls.issuer.kind
+                  uiType: select
+                issuerName:
+                  fieldParams:
+                    helperText: An Issuer in this namespace or a ClusterIssuer. Leave empty for a CA created for this cluster.
+                    label: cert-manager issuer
+                    modes:
+                      edit:
+                        disabled: true
+                  path: spec.parameters.tls.issuer.name
+                  uiType: text
+                  validation:
+                    celExpressions:
+                      - celExpr: '!has(spec.parameters) || !has(spec.parameters.tls) || !has(spec.parameters.tls.issuer) || !has(spec.parameters.tls.issuer.name) || spec.parameters.tls.issuer.name == '''' || (has(spec.parameters.tls.mode) && spec.parameters.tls.mode != ''disabled'')'
+                        message: Turn TLS on to use an issuer
+                      - celExpr: '!has(spec.parameters) || !has(spec.parameters.tls) || !has(spec.parameters.tls.issuer) || !has(spec.parameters.tls.issuer.kind) || spec.parameters.tls.issuer.kind == '''' || (has(spec.parameters.tls.issuer.name) && spec.parameters.tls.issuer.name != '''')'
+                        message: Name the issuer
+                    regex:
+                      message: Must be a valid Kubernetes object name (lowercase letters, digits, '-' and '.')
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+              componentsOrder:
+                - issuerName
+                - issuerKind
+              description: A cert-manager issuer that signs every certificate instead of a CA created for this cluster. It must put its CA certificate into the certificate secrets (ca.crt), as CA and Vault issuers do. Can only be chosen when the cluster is created.
+              groupType: bordered
+              label: Bring your own CA (optional)
+              uiType: group
+            mode:
               fieldParams:
-                defaultValue: false
-                helperText: cert-manager issues the certificates instead of the provider. Requires cert-manager in the cluster.
-                label: Issue certificates with cert-manager
-                modes:
-                  edit:
-                    disabled: true
-              path: spec.topology.parameters.tls.certManager.enabled
-              uiType: toggle
-            clientTLS:
-              fieldParams:
-                defaultValue: true
-                helperText: MySQL clients can connect to TiDB (or TiProxy) over TLS and verify it with the CA in the connection secret.
-                label: Encrypt client connections (TLS)
-                modes:
-                  edit:
-                    disabled: true
-              path: spec.topology.parameters.tls.client
-              uiType: toggle
-            clusterTLS:
-              fieldParams:
-                defaultValue: true
-                helperText: PD, TiKV, TiDB, TiFlash and TiProxy authenticate each other with certificates and encrypt their traffic.
-                label: Encrypt traffic between components (mTLS)
-                modes:
-                  edit:
-                    disabled: true
-              path: spec.topology.parameters.tls.cluster
-              uiType: toggle
-            issuerKind:
-              fieldParams:
-                defaultValue: Issuer
-                label: Issuer kind
-                modes:
-                  edit:
-                    disabled: true
+                defaultValue: preferTLS
+                helperText: Preferred and Required encrypt the traffic between PD, TiKV, TiDB, TiFlash and TiProxy with mutual TLS and let MySQL clients verify TiDB (or TiProxy) with the CA in the connection secret; Required also refuses plaintext clients. Switching between Preferred and Required works anytime; Disabled can only be chosen when the cluster is created.
+                label: TLS mode
                 options:
-                  - label: Issuer
-                    value: Issuer
-                  - label: ClusterIssuer
-                    value: ClusterIssuer
-              path: spec.topology.parameters.tls.certManager.issuerRef.kind
+                  - label: Disabled
+                    value: disabled
+                  - label: 'Preferred: clients choose whether to use TLS'
+                    value: preferTLS
+                  - label: 'Required: clients must use TLS'
+                    value: requireTLS
+              path: spec.parameters.tls.mode
               uiType: select
-            issuerName:
-              fieldParams:
-                helperText: An Issuer in this namespace or a ClusterIssuer that signs the certificates and provides the CA (ca.crt). Leave empty for a CA cert-manager creates for this cluster.
-                label: cert-manager issuer (optional)
-                modes:
-                  edit:
-                    disabled: true
-              path: spec.topology.parameters.tls.certManager.issuerRef.name
-              uiType: text
           componentsOrder:
-            - clusterTLS
-            - clientTLS
-            - certManager
-            - issuerName
-            - issuerKind
-          description: Encrypt traffic with certificates the provider issues for this cluster. Can only be chosen when the cluster is created.
+            - mode
+            - issuer
+          description: Encrypt traffic with TLS, and choose who signs the certificates. The certificates come from cert-manager when it is installed, and from the provider otherwise.
           label: Security
         tidb:
           components:

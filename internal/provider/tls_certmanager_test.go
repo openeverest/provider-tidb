@@ -19,18 +19,19 @@ import (
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
-	"github.com/openeverest/provider-tidb/definition/topologies/cluster"
+	"github.com/openeverest/provider-tidb/definition"
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
-func certManagerTopology(clusterTLS, clientTLS bool, cm *cluster.CertManager) cluster.ClusterTopologyParameters {
-	return cluster.ClusterTopologyParameters{TLS: &cluster.TLS{Cluster: clusterTLS, Client: clientTLS, CertManager: cm}}
+func issuerTLS(name string, kind definition.IssuerKind, group string) *definition.TLSParameters {
+	return &definition.TLSParameters{Mode: definition.TLSModePrefer,
+		Issuer: &definition.IssuerReference{Name: name, Kind: kind, Group: group}}
 }
 
 // certManagerContext builds a context whose client knows cert-manager's types;
 // withCRDs controls whether its REST mapper serves them, as an installed
 // cert-manager would.
-func certManagerContext(t *testing.T, params any, withCRDs bool, objs ...client.Object) (*controller.Context, client.Client) {
+func certManagerContext(t *testing.T, tls *definition.TLSParameters, withCRDs bool, objs ...client.Object) (*controller.Context, client.Client) {
 	t.Helper()
 	installs := []func(*runtime.Scheme) error{corev1alpha1.AddToScheme, tidbcorev1.Install, corev1.AddToScheme}
 	scheme := runtime.NewScheme()
@@ -51,7 +52,7 @@ func certManagerContext(t *testing.T, params any, withCRDs bool, objs ...client.
 	cl := fake.NewClientBuilder().WithScheme(scheme).
 		WithRESTMapper(testrestmapper.TestOnlyStaticRESTMapper(mapperScheme)).
 		WithObjects(objs...).Build()
-	return controller.NewContext(context.Background(), cl, topologyInstance(t, params), common.ProviderName), cl
+	return controller.NewContext(context.Background(), cl, tlsInstance(t, tls), common.ProviderName), cl
 }
 
 func listCertificates(t *testing.T, cl client.Client) map[string]cmapi.Certificate {
@@ -82,8 +83,9 @@ func listIssuers(t *testing.T, cl client.Client) []string {
 }
 
 func TestCertManagerSelfSignedCA(t *testing.T) {
-	c, cl := certManagerContext(t, certManagerTopology(true, true, &cluster.CertManager{Enabled: true}), true)
-	if err := ensureTLSSecrets(c, testCluster()); err != nil {
+	// Managed certificates go through cert-manager because it is installed.
+	c, cl := certManagerContext(t, tlsMode(definition.TLSModePrefer), true)
+	if err := issueTLS(c, testCluster()); err != nil {
 		t.Fatalf("ensureTLSSecrets: %v", err)
 	}
 
@@ -136,39 +138,62 @@ func TestCertManagerSelfSignedCA(t *testing.T) {
 	}
 }
 
-// The probe the conformance harness cannot run with TLS off.
-func TestCertManagerFieldsAreReconciled(t *testing.T) {
+func TestCertManagerIssuer(t *testing.T) {
 	tests := []struct {
 		name        string
-		cm          *cluster.CertManager
+		tls         *definition.TLSParameters
 		wantIssuer  string
 		wantKind    string
+		wantGroup   string
 		wantIssuers []string
 	}{
-		{name: "enabled", cm: &cluster.CertManager{Enabled: true},
-			wantIssuer: "orders-tls-ca", wantKind: "Issuer", wantIssuers: []string{"orders-tls-ca", "orders-tls-selfsigned"}},
-		{name: "issuer name implies cert-manager", cm: &cluster.CertManager{IssuerRef: &cluster.IssuerRef{Name: "corp-ca"}},
-			wantIssuer: "corp-ca", wantKind: "Issuer"},
-		{name: "cluster issuer", cm: &cluster.CertManager{Enabled: true, IssuerRef: &cluster.IssuerRef{Name: "corp-ca", Kind: "ClusterIssuer"}},
-			wantIssuer: "corp-ca", wantKind: "ClusterIssuer"},
+		{name: "managed", tls: tlsMode(definition.TLSModePrefer),
+			wantIssuer: "orders-tls-ca", wantKind: "Issuer", wantGroup: "cert-manager.io",
+			wantIssuers: []string{"orders-tls-ca", "orders-tls-selfsigned"}},
+		{name: "issuer with defaults", tls: issuerTLS("corp-ca", "", ""),
+			wantIssuer: "corp-ca", wantKind: "Issuer", wantGroup: "cert-manager.io"},
+		{name: "cluster issuer", tls: issuerTLS("corp-ca", definition.IssuerKindClusterIssuer, ""),
+			wantIssuer: "corp-ca", wantKind: "ClusterIssuer", wantGroup: "cert-manager.io"},
+		{name: "external issuer", tls: issuerTLS("pca", "AWSPCAClusterIssuer", "awspca.cert-manager.io"),
+			wantIssuer: "pca", wantKind: "AWSPCAClusterIssuer", wantGroup: "awspca.cert-manager.io"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, cl := certManagerContext(t, certManagerTopology(true, false, tt.cm), true)
-			if err := ensureTLSSecrets(c, testCluster()); err != nil {
+			c, cl := certManagerContext(t, tt.tls, true)
+			if err := issueTLS(c, testCluster()); err != nil {
 				t.Fatal(err)
 			}
 			cert, ok := listCertificates(t, cl)["orders-pd-cluster-secret"]
 			if !ok {
 				t.Fatal("no PD certificate")
 			}
-			if ref := cert.Spec.IssuerRef; ref.Name != tt.wantIssuer || ref.Kind != tt.wantKind || ref.Group != "cert-manager.io" {
-				t.Errorf("issuerRef = %+v, want %s %s", ref, tt.wantKind, tt.wantIssuer)
+			if ref := cert.Spec.IssuerRef; ref.Name != tt.wantIssuer || ref.Kind != tt.wantKind || ref.Group != tt.wantGroup {
+				t.Errorf("issuerRef = %+v, want %s.%s %s", ref, tt.wantKind, tt.wantGroup, tt.wantIssuer)
 			}
 			if got := listIssuers(t, cl); !slices.Equal(got, tt.wantIssuers) {
 				t.Errorf("issuers = %v, want %v", got, tt.wantIssuers)
 			}
 		})
+	}
+}
+
+func TestCertManagerAdditionalNames(t *testing.T) {
+	tls := issuerTLS("corp-ca", definition.IssuerKindClusterIssuer, "")
+	tls.AdditionalNames = []string{"db.example.com", "*.db.example.com"}
+	c, cl := certManagerContext(t, tls, true)
+	withTiProxy(c.Instance(), 2, "")
+	if err := issueTLS(c, testCluster()); err != nil {
+		t.Fatal(err)
+	}
+	certs := listCertificates(t, cl)
+	for _, name := range []string{"orders-tidb-server-secret", "orders-tiproxy-server-secret"} {
+		names := certs[name].Spec.DNSNames
+		if !slices.Contains(names, "db.example.com") || !slices.Contains(names, "*.db.example.com") {
+			t.Errorf("%s: dnsNames %v lack the additional names", name, names)
+		}
+	}
+	if names := certs["orders-pd-cluster-secret"].Spec.DNSNames; slices.Contains(names, "db.example.com") {
+		t.Errorf("cluster certificate carries the additional names: %v", names)
 	}
 }
 
@@ -181,9 +206,8 @@ func TestCertManagerSecretsAreAdopted(t *testing.T) {
 	// The fake client's server-side apply assigns no UID; start from a
 	// Certificate that already exists, as it does once cert-manager wrote it.
 	existing := &cmapi.Certificate{ObjectMeta: metav1.ObjectMeta{Name: "orders-tidb-server-secret", Namespace: testNamespace, UID: "cert-uid"}}
-	params := certManagerTopology(false, true, &cluster.CertManager{IssuerRef: &cluster.IssuerRef{Name: "corp-ca"}})
-	c, cl := certManagerContext(t, params, true, issued, existing)
-	if err := ensureTLSSecrets(c, testCluster()); err != nil {
+	c, cl := certManagerContext(t, issuerTLS("corp-ca", "", ""), true, issued, existing)
+	if err := issueTLS(c, testCluster()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -210,9 +234,19 @@ func TestCertManagerSecretsAreAdopted(t *testing.T) {
 	}
 }
 
-func TestValidateTiDBCertManager(t *testing.T) {
-	cm := &cluster.CertManager{Enabled: true}
-	clusterWithSource := func(source string) client.Object {
+func TestValidateTiDBIssuerNeedsCertManager(t *testing.T) {
+	for _, withCRDs := range []bool{true, false} {
+		c, _ := certManagerContext(t, issuerTLS("corp", definition.IssuerKindClusterIssuer, ""), withCRDs, testProvider())
+		want := ""
+		if !withCRDs {
+			want = "issuer requires cert-manager: the Certificate CRD (cert-manager.io/v1) is not installed"
+		}
+		assertError(t, validateAll(c), want)
+	}
+}
+
+func TestBuildClusterRecordsTLSSource(t *testing.T) {
+	existingWith := func(source string) *tidbcorev1.Cluster {
 		cl := testCluster()
 		cl.Spec.TLSCluster = &tidbcorev1.TLSCluster{Enabled: true}
 		if source != "" {
@@ -221,61 +255,23 @@ func TestValidateTiDBCertManager(t *testing.T) {
 		return cl
 	}
 	tests := []struct {
-		name     string
-		params   any
-		withCRDs bool
-		objs     []client.Object
-		wantErr  string
+		name        string
+		tls         *definition.TLSParameters
+		certManager bool
+		existing    client.Object
+		want        string
 	}{
-		{name: "self-signed", params: certManagerTopology(true, true, cm), withCRDs: true},
-		{name: "cluster issuer", params: certManagerTopology(true, true,
-			&cluster.CertManager{IssuerRef: &cluster.IssuerRef{Name: "corp", Kind: "ClusterIssuer"}}), withCRDs: true},
-		{name: "without TLS", params: certManagerTopology(false, false, cm), withCRDs: true,
-			wantErr: "tls.certManager issues certificates for tls.cluster or tls.client"},
-		{name: "unknown issuer kind", params: certManagerTopology(true, false,
-			&cluster.CertManager{IssuerRef: &cluster.IssuerRef{Name: "corp", Kind: "Vault"}}), withCRDs: true,
-			wantErr: `tls.certManager.issuerRef.kind "Vault" must be Issuer or ClusterIssuer`},
-		{name: "cert-manager missing", params: certManagerTopology(true, false, cm),
-			wantErr: "tls.certManager requires cert-manager: the Certificate CRD (cert-manager.io/v1) is not installed"},
-		{name: "same source", params: certManagerTopology(true, false, cm), withCRDs: true,
-			objs: []client.Object{clusterWithSource("cert-manager")}},
-		{name: "provider to cert-manager", params: certManagerTopology(true, false, cm), withCRDs: true,
-			objs:    []client.Object{clusterWithSource("provider")},
-			wantErr: "the TLS certificate source cannot be changed after the Instance is created: it is provider"},
-		{name: "cluster from before the source was recorded", params: certManagerTopology(true, false, cm), withCRDs: true,
-			objs:    []client.Object{clusterWithSource("")},
-			wantErr: "the TLS certificate source cannot be changed after the Instance is created: it is provider"},
-		{name: "switching issuer", params: certManagerTopology(true, false,
-			&cluster.CertManager{IssuerRef: &cluster.IssuerRef{Name: "other"}}), withCRDs: true,
-			objs:    []client.Object{clusterWithSource("cert-manager:Issuer/corp")},
-			wantErr: "it is cert-manager:Issuer/corp"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c, _ := certManagerContext(t, tt.params, tt.withCRDs, append([]client.Object{testProvider()}, tt.objs...)...)
-			assertError(t, validateAll(c), tt.wantErr)
-		})
-	}
-}
-
-func TestBuildClusterRecordsTLSSource(t *testing.T) {
-	tests := []struct {
-		name     string
-		params   any
-		existing client.Object
-		want     string
-	}{
-		{name: "plaintext", params: nil, want: ""},
-		{name: "provider", params: tlsTopology(true, true), want: "provider"},
-		{name: "cert-manager", params: certManagerTopology(false, true, &cluster.CertManager{Enabled: true}), want: "cert-manager"},
-		{name: "user issuer", params: certManagerTopology(true, false,
-			&cluster.CertManager{IssuerRef: &cluster.IssuerRef{Name: "corp", Kind: "ClusterIssuer"}}), want: "cert-manager:ClusterIssuer/corp"},
-		{name: "existing cluster keeps its source", params: tlsTopology(true, true),
-			existing: func() client.Object {
-				cl := testCluster()
-				cl.Annotations = map[string]string{tlsSourceAnnotation: "cert-manager"}
-				return cl
-			}(), want: "cert-manager"},
+		{name: "plaintext", tls: nil, want: ""},
+		{name: "provider without cert-manager", tls: tlsMode(definition.TLSModePrefer), want: "provider"},
+		{name: "cert-manager when installed", tls: tlsMode(definition.TLSModeRequire), certManager: true, want: "cert-manager"},
+		{name: "user issuer", tls: issuerTLS("corp", definition.IssuerKindClusterIssuer, ""), certManager: true,
+			want: "cert-manager:ClusterIssuer/corp"},
+		{name: "external issuer", tls: issuerTLS("pca", "AWSPCAClusterIssuer", "awspca.cert-manager.io"), certManager: true,
+			want: "cert-manager:AWSPCAClusterIssuer.awspca.cert-manager.io/pca"},
+		{name: "existing cluster keeps its source", tls: tlsMode(definition.TLSModePrefer), certManager: true,
+			existing: existingWith("provider"), want: "provider"},
+		{name: "cluster from before the source was recorded", tls: tlsMode(definition.TLSModePrefer), certManager: true,
+			existing: existingWith(""), want: "provider"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -283,7 +279,7 @@ func TestBuildClusterRecordsTLSSource(t *testing.T) {
 			if tt.existing != nil {
 				objs = append(objs, tt.existing)
 			}
-			c, _ := tlsContext(t, tt.params, objs...)
+			c, _ := certManagerContext(t, tt.tls, tt.certManager, objs...)
 			built, err := buildCluster(c)
 			if err != nil {
 				t.Fatal(err)

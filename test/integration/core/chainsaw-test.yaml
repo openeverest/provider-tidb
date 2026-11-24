@@ -71,7 +71,7 @@ spec:
               pw=$(kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath='{.data.password}' | base64 -d)
               test -n "$pw" || { echo "connection secret has empty password"; exit 1; }
               echo "connection secret password length: ${#pw}"
-              # With client TLS the connection secret carries the CA to verify TiDB with.
+              # With TLS the connection secret carries the CA to verify TiDB with.
               kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath='{.data.ca\.crt}' | base64 -d | grep -q "BEGIN CERTIFICATE" \
                 || { echo "connection secret has no CA"; exit 1; }
 
@@ -196,17 +196,17 @@ spec:
         - assert:
             file: 23-assert.yaml
 
-    - name: changing-tls-rejected
+    - name: disabling-tls-rejected
       try:
-        - patch:
-            file: 25-disable-cluster-tls.yaml
+        # The operator can't switch TLS on a running cluster, so admission
+        # refuses the change and the Instance keeps TLS on.
+        - script:
+            content: kubectl patch -n $NAMESPACE instance/test-instance --type merge --patch-file 25-disable-tls.yaml
+            check:
+              ($error != null): true
+              (contains($stderr, 'spec.parameters.tls.mode')): true
         - assert:
             file: 25-assert.yaml
-        # Asking for the original setting again brings the Instance back.
-        - patch:
-            file: 25-restore-cluster-tls.yaml
-        - assert:
-            file: 11-assert.yaml
 
     - name: enable-tiflash
       try:
@@ -247,7 +247,7 @@ spec:
         - assert:
             file: 13-assert.yaml
 
-    - name: cert-manager-certificates
+    - name: bring-your-own-ca
       try:
         - apply:
             file: 30-create-cm-instance.yaml

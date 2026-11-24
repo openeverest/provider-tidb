@@ -1,0 +1,9 @@
+# TLS can only be chosen when the Instance is created.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  parameters:
+    tls:
+      mode: disabled

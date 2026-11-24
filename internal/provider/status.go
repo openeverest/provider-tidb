@@ -403,7 +403,7 @@ func connectionDetails(c *controller.Context) controller.ConnectionDetails {
 	// With client TLS the host is in TiDB's (or TiProxy's) certificate, signed
 	// by the same CA, so clients can verify it against the CA
 	// (e.g. mysql --ssl-mode=VERIFY_IDENTITY --ssl-ca=ca.crt).
-	clientTLS := tlsSettings(c).Client
+	clientTLS := tlsEnabled(tlsParameters(c))
 	if clientTLS {
 		if ca, err := readClientCA(c); err == nil && len(ca) > 0 {
 			details.AdditionalProperties = map[string]string{tlsKeyCA: string(ca)}

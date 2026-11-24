@@ -11,6 +11,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
+
+	"github.com/openeverest/provider-tidb/definition"
 )
 
 // secretOwnedBy is a Secret controlled by a Cluster or Instance with the given UID.
@@ -30,12 +32,12 @@ func secretOwnedBy(name, kind string, uid types.UID, data map[string][]byte) *co
 // the new cluster with a CA that then disappeared and no PD certificate.
 func TestTLSSecretsOfAPreviousClusterAreReplaced(t *testing.T) {
 	stale := map[string][]byte{"ca.crt": []byte("old")}
-	c, cl := tlsContext(t, tlsTopology(true, true),
+	c, cl := tlsContext(t, tlsMode(definition.TLSModePrefer),
 		secretOwnedBy("orders-tls-ca", "Cluster", "old-cluster-uid", stale),
 		secretOwnedBy("orders-pd-cluster-secret", "Cluster", "old-cluster-uid", stale))
 	owner := testCluster()
 
-	err := ensureTLSSecrets(c, owner)
+	err := issueTLS(c, owner)
 	if !controller.IsWaitError(err) {
 		t.Fatalf("ensureTLSSecrets = %v, want a wait while the stale Secrets go", err)
 	}
@@ -47,7 +49,7 @@ func TestTLSSecretsOfAPreviousClusterAreReplaced(t *testing.T) {
 
 	// Once the stale Secrets are gone, everything is issued for the new cluster.
 	_ = cl.Delete(context.Background(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "orders-pd-cluster-secret", Namespace: testNamespace}})
-	if err := ensureTLSSecrets(c, owner); err != nil {
+	if err := issueTLS(c, owner); err != nil {
 		t.Fatalf("ensureTLSSecrets: %v", err)
 	}
 	for _, name := range []string{"orders-tls-ca", "orders-pd-cluster-secret", "orders-tikv-cluster-secret"} {

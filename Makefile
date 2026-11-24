@@ -12,7 +12,8 @@ OPENEVEREST_BRANCH ?= v2.0.0-alpha.1
 # TiDB Operator (v2) version whose CRDs and image the provider targets.
 OPERATOR_VERSION ?= v2.0.1
 
-# cert-manager version whose CRDs the provider targets for tls.certManager.
+# cert-manager version the provider targets: it issues managed certificates when
+# installed, and the ones signed by tls.issuer.
 CERT_MANAGER_VERSION ?= v1.20.2
 
 # Released provider chart the upgrade suite starts from; empty means the latest release.
@@ -211,9 +212,11 @@ install-crds: yq ## Install OpenEverest CRDs (and your operator's CRDs) into the
 	# TiDB Operator BR CRDs used by the backup provider.
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/br.pingcap.com_backups.yaml
 	kubectl apply --server-side -f https://raw.githubusercontent.com/pingcap/tidb-operator/$(OPERATOR_VERSION)/manifests/crd/br.pingcap.com_restores.yaml
-	# cert-manager CRDs for tls.certManager; clusters running cert-manager already have them.
-	kubectl get crd certificates.cert-manager.io >/dev/null 2>&1 || \
-		kubectl apply --server-side -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.crds.yaml
+	# cert-manager, which issues the managed certificates once its CRDs exist;
+	# clusters running cert-manager already have it.
+	kubectl get crd certificates.cert-manager.io >/dev/null 2>&1 || { \
+		kubectl apply --server-side -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml && \
+		kubectl -n cert-manager rollout status deploy --timeout=5m; }
 
 .PHONY: deploy-provider-ci
 deploy-provider-ci: helm-deps ## Deploy the provider via Helm for CI (IMG must already be imported into k3d).

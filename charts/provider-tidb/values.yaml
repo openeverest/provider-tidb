@@ -168,10 +168,10 @@ presets:
       providerRef:
         name: tidb
       version: "8.5.8"
+      parameters:
+        tls: {mode: preferTLS}
       topology:
         type: cluster
-        parameters:
-          tls: {cluster: true, client: true}
       components:
         pd:
           type: pd
@@ -205,10 +205,10 @@ presets:
       providerRef:
         name: tidb
       version: "8.5.8"
+      parameters:
+        tls: {mode: preferTLS}
       topology:
         type: cluster
-        parameters:
-          tls: {cluster: true, client: true}
       components:
         pd:
           type: pd
@@ -244,10 +244,10 @@ presets:
       providerRef:
         name: tidb
       version: "8.5.8"
+      parameters:
+        tls: {mode: preferTLS}
       topology:
         type: cluster
-        parameters:
-          tls: {cluster: true, client: true}
       components:
         pd:
           type: pd

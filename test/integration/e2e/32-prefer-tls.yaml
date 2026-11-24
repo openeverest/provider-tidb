@@ -3,7 +3,6 @@ kind: Instance
 metadata:
   name: test-instance
 spec:
-  topology:
-    parameters:
-      tls:
-        cluster: true
+  parameters:
+    tls:
+      mode: preferTLS

@@ -1,0 +1,7 @@
+# The provider records on the Cluster that TiDB requires secure transport.
+apiVersion: core.pingcap.com/v1alpha1
+kind: Cluster
+metadata:
+  name: test-instance
+  annotations:
+    tidb.openeverest.io/require-secure-transport: "true"

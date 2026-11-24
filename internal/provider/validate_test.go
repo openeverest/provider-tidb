@@ -8,14 +8,14 @@ import (
 
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
-	"github.com/openeverest/provider-tidb/definition/topologies/cluster"
+	"github.com/openeverest/provider-tidb/definition"
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
 // Admission runs Validate without a client, so it must only decode the
 // Instance and leave the checks that read the cluster to ValidateReferences.
 func TestValidateLeavesClusterChecksToReferences(t *testing.T) {
-	c, _ := certManagerContext(t, certManagerTopology(true, false, &cluster.CertManager{Enabled: true}), false, testProvider())
+	c, _ := certManagerContext(t, issuerTLS("corp", definition.IssuerKindClusterIssuer, ""), false, testProvider())
 	in := c.Instance()
 	pd := in.Spec.Components[common.ComponentPD]
 	pd.Replicas = ptr.To[int32](2)
@@ -35,7 +35,7 @@ func TestValidateLeavesClusterChecksToReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(refs) != 1 || refs[0].Field != "spec.topology.parameters.tls" ||
+	if len(refs) != 1 || refs[0].Field != "spec.parameters.tls" ||
 		!strings.Contains(refs[0].Detail, "the Certificate CRD") {
 		t.Fatalf("ValidateReferences errors = %v, want the missing cert-manager CRD", refs)
 	}

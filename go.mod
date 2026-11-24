@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/cert-manager/cert-manager v1.20.3
+	github.com/go-sql-driver/mysql v1.10.2
 	github.com/openeverest/openeverest/v2 v2.0.0-alpha.1
 	github.com/pingcap/tidb-operator/api/v2 v2.0.0-20260325134427-c1490b6fd060
 	github.com/robfig/cron/v3 v3.0.1
@@ -20,6 +21,7 @@ require (
 
 require (
 	cel.dev/expr v0.25.2 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Percona-Lab/percona-version-service v0.0.0-20240311164804-ffbc02387a1b // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect

@@ -24,7 +24,7 @@ import (
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 	metav1alpha1 "github.com/pingcap/tidb-operator/api/v2/meta/v1alpha1"
 
-	"github.com/openeverest/provider-tidb/definition/topologies/cluster"
+	"github.com/openeverest/provider-tidb/definition"
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
@@ -271,15 +271,9 @@ func ptrTo[T any](v T) *T { return &v }
 
 // tiproxyContext is a context for in with Secrets in the scheme and the given
 // topology parameters (nil for none).
-func tiproxyContext(t *testing.T, in *corev1alpha1.Instance, params any, objs ...client.Object) (*controller.Context, client.Client) {
+func tiproxyContext(t *testing.T, in *corev1alpha1.Instance, tls *definition.TLSParameters, objs ...client.Object) (*controller.Context, client.Client) {
 	t.Helper()
-	if params != nil {
-		raw, err := json.Marshal(params)
-		if err != nil {
-			t.Fatal(err)
-		}
-		in.Spec.Topology = &corev1alpha1.TopologySpec{Type: "cluster", Parameters: &runtime.RawExtension{Raw: raw}}
-	}
+	setTLS(t, in, tls)
 	scheme := runtime.NewScheme()
 	for _, install := range []func(*runtime.Scheme) error{corev1alpha1.AddToScheme, tidbcorev1.Install, corev1.AddToScheme} {
 		if err := install(scheme); err != nil {
@@ -409,7 +403,7 @@ func TestEnsureSessionTokenSigningSecret(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c, cl := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), tt.tiproxy, ""), nil)
-			assertError(t, ensureTLSSecrets(c, tt.cluster), "")
+			assertError(t, issueTLS(c, tt.cluster), "")
 
 			list := &corev1.SecretList{}
 			if err := cl.List(context.Background(), list); err != nil {
@@ -438,8 +432,8 @@ func TestEnsureSessionTokenSigningSecret(t *testing.T) {
 }
 
 func TestTiProxyTLSSecrets(t *testing.T) {
-	c, cl := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), 2, ""), tlsTopology(true, true))
-	assertError(t, ensureTLSSecrets(c, testCluster()), "")
+	c, cl := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), 2, ""), tlsMode(definition.TLSModePrefer))
+	assertError(t, issueTLS(c, testCluster()), "")
 
 	roots := x509.NewCertPool()
 	roots.AddCert(parseCert(t, mustSecret(t, cl, "orders-tls-ca").Data["ca.crt"]))
@@ -472,18 +466,17 @@ func TestTiProxyTLSSecretsSelection(t *testing.T) {
 	tests := []struct {
 		name    string
 		tiproxy int32
-		params  any
+		tls     *definition.TLSParameters
 		want    []string
 	}{
-		{"tiproxy off", 0, tlsTopology(true, true), nil},
-		{"cluster tls", 2, tlsTopology(true, false), []string{"orders-tiproxy-cluster-secret"}},
-		{"client tls", 2, tlsTopology(false, true), []string{"orders-tiproxy-server-secret", "orders-tiproxy-tidb-secret"}},
-		{"both", 2, tlsTopology(true, true), tiproxySecrets},
+		{"tiproxy off", 0, tlsMode(definition.TLSModePrefer), nil},
+		{"disabled", 2, tlsMode(definition.TLSModeDisabled), nil},
+		{"preferTLS", 2, tlsMode(definition.TLSModePrefer), tiproxySecrets},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, _ := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), tt.tiproxy, ""), tt.params)
-			assertError(t, ensureTLSSecrets(c, testCluster()), "")
+			c, _ := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), tt.tiproxy, ""), tt.tls)
+			assertError(t, issueTLS(c, testCluster()), "")
 			var got []string
 			for _, name := range tiproxySecrets {
 				if found, err := c.Exists(&corev1.Secret{}, name); err != nil {
@@ -500,9 +493,9 @@ func TestTiProxyTLSSecretsSelection(t *testing.T) {
 }
 
 func TestTiProxyCertManagerCertificates(t *testing.T) {
-	c, cl := certManagerContext(t, certManagerTopology(true, true, &cluster.CertManager{Enabled: true}), true)
+	c, cl := certManagerContext(t, tlsMode(definition.TLSModePrefer), true)
 	c.Instance().Spec.Components[common.ComponentTiProxy] = corev1alpha1.ComponentSpec{Type: common.ComponentTiProxy}
-	assertError(t, ensureTLSSecrets(c, testCluster()), "")
+	assertError(t, issueTLS(c, testCluster()), "")
 
 	certs := listCertificates(t, cl)
 	for _, name := range []string{
@@ -534,7 +527,7 @@ func TestTiProxyCertManagerCertificates(t *testing.T) {
 func TestBuildTiProxyGroupTLS(t *testing.T) {
 	tests := []struct {
 		name        string
-		params      any
+		params      *definition.TLSParameters
 		config      string
 		wantTLS     bool
 		wantConfig  []string
@@ -542,9 +535,9 @@ func TestBuildTiProxyGroupTLS(t *testing.T) {
 	}{
 		{name: "plaintext", params: nil, config: "[log]\nlevel = \"warn\"\n",
 			wantConfig: []string{`level = "warn"`}, wantMissing: []string{"skip-ca"}},
-		{name: "cluster tls only", params: tlsTopology(true, false), wantMissing: []string{"skip-ca"}},
-		{name: "client tls", params: tlsTopology(true, true), wantTLS: true, wantConfig: []string{"skip-ca = true"}},
-		{name: "client tls keeps the user's config", params: tlsTopology(false, true), config: "[log]\nlevel = \"warn\"\n",
+		{name: "disabled", params: tlsMode(definition.TLSModeDisabled), wantMissing: []string{"skip-ca"}},
+		{name: "preferTLS", params: tlsMode(definition.TLSModePrefer), wantTLS: true, wantConfig: []string{"skip-ca = true"}},
+		{name: "preferTLS keeps the user's config", params: tlsMode(definition.TLSModePrefer), config: "[log]\nlevel = \"warn\"\n",
 			wantTLS: true, wantConfig: []string{`level = "warn"`, "[security.server-tls]", "skip-ca = true"}},
 	}
 	for _, tt := range tests {
@@ -606,7 +599,7 @@ func TestWithOptionalClientCerts(t *testing.T) {
 }
 
 func TestTiProxyMetricsEndpoints(t *testing.T) {
-	c, cl := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), 2, ""), tlsTopology(true, false),
+	c, cl := tiproxyContext(t, withTiProxy(testInstance("8.5.2"), 2, ""), tlsMode(definition.TLSModePrefer),
 		append(componentGroups(1, common.ComponentTiProxy), mtlsCluster())...)
 
 	sources, err := New().MonitoringSources(c)
@@ -621,7 +614,7 @@ func TestTiProxyMetricsEndpoints(t *testing.T) {
 	}
 
 	// The scrape verifies TiProxy by the server name its cluster certificate carries.
-	assertError(t, ensureTLSSecrets(c, testCluster()), "")
+	assertError(t, issueTLS(c, testCluster()), "")
 	roots := x509.NewCertPool()
 	roots.AddCert(parseCert(t, mustSecret(t, cl, "orders-tls-ca").Data["ca.crt"]))
 	cert := parseCert(t, mustSecret(t, cl, "orders-tiproxy-cluster-secret").Data["tls.crt"])

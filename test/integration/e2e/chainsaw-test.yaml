@@ -78,6 +78,33 @@ spec:
             timeout: 3m
             file: 30-assert.yaml
 
+    - name: require-tls
+      try:
+        # requireTLS sets TiDB's require_secure_transport, so plaintext clients
+        # are refused, directly and through TiProxy alike.
+        - apply:
+            file: 50-sql-shell.yaml
+        - assert:
+            file: 50-assert.yaml
+        - patch:
+            file: 31-require-tls.yaml
+        - assert:
+            file: 31-assert.yaml
+        - script:
+            content: |
+              set -e
+              q() { kubectl -n $NAMESPACE exec sql-shell -- sh -c "mysql -h \"\$DB_HOST\" -P \"\$DB_PORT\" -u \"\$DB_USER\" --ssl-mode=$1 -N -s -e 'SELECT 1'"; }
+              q REQUIRED
+              if q DISABLED; then echo "plaintext connection accepted"; exit 1; fi
+        # preferTLS lets plaintext clients back in.
+        - patch:
+            file: 32-prefer-tls.yaml
+        - assert:
+            file: 32-assert.yaml
+        - script:
+            content: |
+              kubectl -n $NAMESPACE exec sql-shell -- sh -c 'mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" --ssl-mode=DISABLED -N -s -e "SELECT 1"'
+
     - name: tikv-scale-out
       try:
         - apply:

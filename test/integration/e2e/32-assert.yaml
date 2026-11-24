@@ -1,0 +1,6 @@
+# The provider turned require_secure_transport off and dropped the annotation.
+apiVersion: core.pingcap.com/v1alpha1
+kind: Cluster
+metadata:
+  name: test-instance
+  (annotations."tidb.openeverest.io/require-secure-transport" || ''): ""

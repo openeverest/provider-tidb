@@ -12,9 +12,6 @@
 # This file defines both the structural topology (config) and its UI rendering.
 
 config:
-  # parametersSchema references a Go type in definition/topologies/cluster
-  # for topology parameters (metrics collection).
-  parametersSchema: ClusterTopologyParameters
   components:
     tidb:
       defaults:
@@ -408,67 +405,66 @@ ui:
             - storageClass
     security:
       label: "Security"
-      description: "Encrypt traffic with certificates the provider issues for this cluster. Can only be chosen when the cluster is created."
+      description: "Encrypt traffic with TLS, and choose who signs the certificates. The certificates come from cert-manager when it is installed, and from the provider otherwise."
       components:
-        clusterTLS:
-          uiType: toggle
-          path: spec.topology.parameters.tls.cluster
-          fieldParams:
-            label: "Encrypt traffic between components (mTLS)"
-            helperText: "PD, TiKV, TiDB, TiFlash and TiProxy authenticate each other with certificates and encrypt their traffic."
-            defaultValue: true
-            modes:
-              edit:
-                disabled: true
-        clientTLS:
-          uiType: toggle
-          path: spec.topology.parameters.tls.client
-          fieldParams:
-            label: "Encrypt client connections (TLS)"
-            helperText: "MySQL clients can connect to TiDB (or TiProxy) over TLS and verify it with the CA in the connection secret."
-            defaultValue: true
-            modes:
-              edit:
-                disabled: true
-        certManager:
-          uiType: toggle
-          path: spec.topology.parameters.tls.certManager.enabled
-          fieldParams:
-            label: "Issue certificates with cert-manager"
-            helperText: "cert-manager issues the certificates instead of the provider. Requires cert-manager in the cluster."
-            defaultValue: false
-            modes:
-              edit:
-                disabled: true
-        issuerName:
-          uiType: text
-          path: spec.topology.parameters.tls.certManager.issuerRef.name
-          fieldParams:
-            label: "cert-manager issuer (optional)"
-            helperText: "An Issuer in this namespace or a ClusterIssuer that signs the certificates and provides the CA (ca.crt). Leave empty for a CA cert-manager creates for this cluster."
-            modes:
-              edit:
-                disabled: true
-        issuerKind:
+        mode:
           uiType: select
-          path: spec.topology.parameters.tls.certManager.issuerRef.kind
+          path: spec.parameters.tls.mode
           fieldParams:
-            label: "Issuer kind"
-            defaultValue: Issuer
+            label: "TLS mode"
+            helperText: "Preferred and Required encrypt the traffic between PD, TiKV, TiDB, TiFlash and TiProxy with mutual TLS and let MySQL clients verify TiDB (or TiProxy) with the CA in the connection secret; Required also refuses plaintext clients. Switching between Preferred and Required works anytime; Disabled can only be chosen when the cluster is created."
+            defaultValue: "preferTLS"
             options:
-              - label: Issuer
-                value: Issuer
-              - label: ClusterIssuer
-                value: ClusterIssuer
-            modes:
-              edit:
-                disabled: true
+              - label: "Disabled"
+                value: "disabled"
+              - label: "Preferred: clients choose whether to use TLS"
+                value: "preferTLS"
+              - label: "Required: clients must use TLS"
+                value: "requireTLS"
+        issuer:
+          uiType: group
+          groupType: bordered
+          label: "Bring your own CA (optional)"
+          description: "A cert-manager issuer that signs every certificate instead of a CA created for this cluster. It must put its CA certificate into the certificate secrets (ca.crt), as CA and Vault issuers do. Can only be chosen when the cluster is created."
+          components:
+            issuerName:
+              uiType: text
+              path: spec.parameters.tls.issuer.name
+              fieldParams:
+                label: "cert-manager issuer"
+                helperText: "An Issuer in this namespace or a ClusterIssuer. Leave empty for a CA created for this cluster."
+                modes:
+                  edit:
+                    disabled: true
+              validation:
+                regex:
+                  pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                  message: "Must be a valid Kubernetes object name (lowercase letters, digits, '-' and '.')"
+                celExpressions:
+                  - celExpr: "!has(spec.parameters) || !has(spec.parameters.tls) || !has(spec.parameters.tls.issuer) || !has(spec.parameters.tls.issuer.name) || spec.parameters.tls.issuer.name == '' || (has(spec.parameters.tls.mode) && spec.parameters.tls.mode != 'disabled')"
+                    message: "Turn TLS on to use an issuer"
+                  - celExpr: "!has(spec.parameters) || !has(spec.parameters.tls) || !has(spec.parameters.tls.issuer) || !has(spec.parameters.tls.issuer.kind) || spec.parameters.tls.issuer.kind == '' || (has(spec.parameters.tls.issuer.name) && spec.parameters.tls.issuer.name != '')"
+                    message: "Name the issuer"
+            issuerKind:
+              uiType: select
+              path: spec.parameters.tls.issuer.kind
+              fieldParams:
+                label: "Issuer kind"
+                helperText: "Issuer when not set"
+                options:
+                  - label: "Issuer"
+                    value: "Issuer"
+                  - label: "ClusterIssuer"
+                    value: "ClusterIssuer"
+                modes:
+                  edit:
+                    disabled: true
+          componentsOrder:
+            - issuerName
+            - issuerKind
       componentsOrder:
-        - clusterTLS
-        - clientTLS
-        - certManager
-        - issuerName
-        - issuerKind
+        - mode
+        - issuer
     advanced:
       label: "Advanced configuration"
       description: "Per-component configuration overrides."

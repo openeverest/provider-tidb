@@ -88,7 +88,7 @@ is covered under [Installation](#installation).
 | Scheduling policy | ✅ | Per-component `schedulingPolicy` (node selector, affinity, tolerations, topology spread, scheduler) |
 | Version upgrades | ✅ | Change the version bundle; the operator rolls PD → TiFlash → TiKV → TiDB. TiProxy has its own version line. Downgrades are rejected |
 | Monitoring | ✅ | Metrics of PD, TiKV, TiDB, TiFlash and TiProxy sent to the `MonitoringDestination`s in `spec.monitoring.destinations` (see [Monitoring](#monitoring)) |
-| TLS | ✅ | mTLS between components and TLS for MySQL clients, with provider-issued certificates (see [Security](#security)) |
+| TLS | ✅ | mTLS between components and TLS for MySQL clients (preferred or required), with certificates from cert-manager, your own CA or the provider (see [Security](#security)) |
 | Connection proxy | ✅ | Optional TiProxy: session balancing and connections that survive TiDB restarts and scaling (see [TiProxy](#tiproxy)) |
 
 Stateful components (PD, TiKV, TiFlash) additionally report:
@@ -195,6 +195,15 @@ helm uninstall provider-tidb --namespace everest-system
 Uninstalling the chart does **not** delete running `Instance` resources, the TiDB CRDs, or any
 data.
 
+### Upgrading from 0.3.x
+
+- **Breaking:** TLS moved from `spec.topology.parameters.tls` (`cluster`, `client`,
+  `certManager`) to `spec.parameters.tls` (`mode`, `issuer`, `additionalNames`). Instances that
+  still carry the old fields fail validation, and the provider leaves their TiDB resources alone,
+  until you move them; see [Migrating](#migrating-from-spectopologyparameterstls).
+- With cert-manager installed, new Instances get their certificates from it instead of from the
+  provider. Existing Instances keep their source.
+
 ### Upgrading from 0.2.x
 
 0.3.x is built for OpenEverest `2.0.0-alpha.1`, which has no conversion from the developer
@@ -297,7 +306,7 @@ kubectl get instances.core.openeverest.io my-tidb -o jsonpath='{.status.connecti
 
 The connection secret holds the MySQL `host`, `port` (4000, or 6000 through [TiProxy](#tiproxy)),
 `username` (`root`) and `password`, and the same endpoint as a `uri`
-(`mysql://root:<password>@<host>:<port>/?tls=false`, with `tls=true` under [client TLS](#security)).
+(`mysql://root:<password>@<host>:<port>/?tls=false`, with `tls=true` under [TLS](#security)).
 The provider generates a random `root` password on first bootstrap (via the operator's
 `bootstrapSQL`), stores it in a Secret, and surfaces it here. Connect with any MySQL client:
 
@@ -502,11 +511,11 @@ components, but downgrades are still rejected. Other settings go in
 `spec.components.tiproxy.parameters.config` as TOML
 ([TiProxy configuration](https://docs.pingcap.com/tidb/stable/tiproxy-configuration)).
 
-With [TLS](#security), TiProxy follows the Instance's settings: with `tls.client` it serves MySQL
-clients over TLS with a certificate for `<instance>-tiproxy` signed by the CA in the connection
-Secret (client certificates are optional, as with TiDB) and connects to TiDB over TLS as well; with
-`tls.cluster` it uses mTLS towards PD and TiDB's status port and serves its API (and metrics) over
-https.
+With [TLS](#security) on, TiProxy serves MySQL clients over TLS with a certificate for
+`<instance>-tiproxy` (plus any `additionalNames`) signed by the CA in the connection Secret (client
+certificates are optional, as with TiDB) and connects to TiDB over TLS as well. It uses mTLS
+towards PD and TiDB's status port and serves its API (and metrics) over https. With `requireTLS` it
+passes plaintext clients on to TiDB, which refuses them.
 
 **Session migration needs a shared signing certificate.** TiProxy moves a session with a token
 the old TiDB node signs and the new one verifies, so all TiDB nodes need the same certificate. The
@@ -582,81 +591,140 @@ instance's `MonitoringConfigured` condition reports whether every entry is confi
 
 ### Security
 
-New Instances encrypt their traffic by default. The **Security** section of the UI
-(`spec.topology.parameters.tls`) has two toggles, both on by default:
-
-| Toggle | Field | Effect |
-|---|---|---|
-| Encrypt traffic between components (mTLS) | `tls.cluster` | PD, TiKV, TiDB, TiFlash and TiProxy authenticate each other with certificates and encrypt their traffic |
-| Encrypt client connections (TLS) | `tls.client` | MySQL clients can connect to TiDB (and [TiProxy](#tiproxy)) over TLS |
+TLS is set in `spec.parameters.tls`, the same shape every OpenEverest provider uses. New
+Instances from the UI use `preferTLS`; an Instance without the field is plaintext.
 
 ```yaml
 spec:
-  topology:
-    type: cluster
-    parameters:
-      tls:
-        cluster: true
-        client: true
+  parameters:
+    tls:
+      mode: preferTLS           # disabled (default) | preferTLS | requireTLS
+      issuer:                   # optional, needs cert-manager
+        name: corp-ca
+        kind: ClusterIssuer     # or Issuer (default), in the Instance's namespace
+      additionalNames:          # optional extra DNS names for the MySQL certificates
+        - tidb.example.com
 ```
 
-Both are chosen when the Instance is created and cannot be changed afterwards: TiDB Operator
-does not switch an existing cluster between plaintext and TLS. An Instance without the field
-(for example one created before this setting existed) stays plaintext.
+| Mode | Effect |
+|---|---|
+| `disabled` | Plaintext everywhere |
+| `preferTLS` | PD, TiKV, TiDB, TiFlash and [TiProxy](#tiproxy) authenticate each other with mTLS; MySQL clients can connect over TLS |
+| `requireTLS` | As `preferTLS`, and TiDB refuses plaintext clients (`require_secure_transport`), also through TiProxy |
 
-The provider generates a CA for each Instance (`<instance>-tls-ca`) and issues every
-certificate from it into the Secrets the operator mounts: `<instance>-{pd,tikv,tidb,tiflash}-cluster-secret`,
-`<instance>-cluster-client-secret` (used by the operator and by BR backups) and
-`<instance>-tidb-server-secret` (TiDB's MySQL certificate). While [TiProxy](#tiproxy) is enabled it
-also issues `<instance>-tiproxy-cluster-secret`, `<instance>-tiproxy-server-secret` (TiProxy's
-MySQL certificate) and `<instance>-tiproxy-tidb-secret` (TiProxy's client certificate towards
-TiDB), plus `<instance>-session-token-signing-secret` with or without TLS. They are deleted with
-the Instance.
+- `disabled` can only be chosen when the Instance is created: TiDB Operator does not switch a
+  running cluster between plaintext and TLS. `preferTLS` and `requireTLS` can be swapped anytime;
+  the provider sets TiDB's `require_secure_transport` global variable over SQL once TiDB serves TLS
+  (TiDB 8.5 ignores the config-file setting), without a restart.
+- `issuer` is chosen at creation and cannot change afterwards.
+- `additionalNames` are DNS names (wildcards such as `*.db.example.com` allowed, no IP addresses)
+  added to TiDB's and TiProxy's MySQL certificates, for clients that reach TiDB through your own
+  DNS or a LoadBalancer. Changing them on a running Instance reissues those certificates and
+  restarts TiDB, so it waits in `status.pendingMaintenance` until you approve its token
+  (`spec.maintenance.approved: tls-names-<hash>`, or `autoApproveUpTo: RollingRestart`);
+  TiProxy picks up its new certificate without a restart.
+- `certificateSecretName`, which other providers offer, is not: TiDB Operator mounts a fixed
+  Secret per component, so one user Secret can't serve them all. Use an `issuer` instead.
 
-With client TLS, the connection Secret `<instance>-conn` carries the CA as `ca.crt`, and the
-published host is in TiDB's (or TiProxy's) certificate, so clients can verify both:
+#### Where the certificates come from
+
+1. With `issuer`, cert-manager issues every certificate from your issuer. It must write the CA
+   into the Secrets (`ca.crt`), as CA and Vault issuers do; ACME issuers cannot be used.
+   An external issuer is referenced with `group` (for example `awspca.cert-manager.io`).
+2. Otherwise, with cert-manager installed, the provider sets up a CA in cert-manager for the
+   Instance (a self-signed `Issuer`, a CA `Certificate` `<instance>-tls-ca` and a CA `Issuer`) and
+   has cert-manager issue the rest.
+3. Without cert-manager, the provider generates the CA (`<instance>-tls-ca`) and every certificate
+   itself.
+
+The source is recorded on the TiDB `Cluster` (`tidb.openeverest.io/tls-certificates`) and kept
+for the life of the Instance. Either way the certificates land in the Secrets the operator
+mounts: `<instance>-{pd,tikv,tidb,tiflash}-cluster-secret`, `<instance>-cluster-client-secret`
+(used by the operator and by BR backups) and `<instance>-tidb-server-secret` (TiDB's MySQL
+certificate). While [TiProxy](#tiproxy) is enabled there are also `<instance>-tiproxy-cluster-secret`,
+`<instance>-tiproxy-server-secret` (TiProxy's MySQL certificate) and `<instance>-tiproxy-tidb-secret`
+(TiProxy's client certificate towards TiDB), plus `<instance>-session-token-signing-secret` with or
+without TLS. They are deleted with the Instance.
+
+With TLS, the connection Secret `<instance>-conn` carries the CA as `ca.crt`, and the published
+host is in TiDB's (or TiProxy's) certificate, so clients can verify both:
 
 ```bash
 kubectl get secret <instance>-conn -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
 mysql -h <host> -P 4000 -u root -p --ssl-mode=VERIFY_IDENTITY --ssl-ca=ca.crt
 ```
 
-TiDB still accepts plaintext connections unless you require TLS, e.g. with
-`ALTER USER ... REQUIRE SSL` or by setting `require_secure_transport`.
-
 With mTLS, [monitoring](#monitoring) scrapes over https with the cluster client certificate.
 
 > [!NOTE]
 > The certificates are valid for ten years and are not rotated yet: TiDB Operator does not
 > reload its own client certificate, and TiDB only picks up a new MySQL certificate after
-> `ALTER INSTANCE RELOAD TLS`.
+> `ALTER INSTANCE RELOAD TLS`. If your issuer caps certificates at a shorter lifetime,
+> cert-manager renews them earlier; restart TiDB Operator after a renewal and run
+> `ALTER INSTANCE RELOAD TLS` on each TiDB.
 
-#### Certificates from cert-manager
+#### Bring your own CA
 
-With [cert-manager](https://cert-manager.io/) installed, the certificates can come from it
-instead (**Issue certificates with cert-manager** in the UI):
+Sign the certificates with your company CA through a cert-manager `ClusterIssuer`, and add the
+name clients use:
 
 ```yaml
-      tls:
-        cluster: true
-        client: true
-        certManager:
-          enabled: true
-          issuerRef:                # optional
-            name: corp-ca
-            kind: ClusterIssuer     # or Issuer (default), in the Instance's namespace
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: corp-ca
+spec:
+  ca:
+    secretName: corp-ca          # tls.crt, tls.key of your CA, in the cert-manager namespace
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: orders
+spec:
+  providerRef:
+    name: tidb
+  parameters:
+    tls:
+      mode: requireTLS
+      issuer:
+        name: corp-ca
+        kind: ClusterIssuer
+      additionalNames:
+        - orders.db.example.com
+  topology:
+    type: cluster
+  # components: ...
 ```
 
-- Without `issuerRef`, the provider sets up a CA in cert-manager for the Instance: a
-  self-signed `Issuer`, a CA `Certificate` (`<instance>-tls-ca`) and a CA `Issuer` that signs the rest.
-- With `issuerRef`, your issuer signs every certificate. It must write the CA into the Secrets
-  (`ca.crt`), as CA and Vault issuers do; ACME issuers cannot be used.
+Point `orders.db.example.com` at TiDB's (or TiProxy's) LoadBalancer address, and clients that
+trust your CA connect with `--ssl-mode=VERIFY_IDENTITY`.
 
-The provider creates one `Certificate` per Secret listed above, valid for ten years, and makes
-each Secret cert-manager writes owned by its `Certificate`, so they are deleted with the Instance.
-The certificate source is chosen at creation, like the toggles. If your issuer caps certificates
-at a shorter lifetime, cert-manager renews them earlier; restart TiDB Operator after a renewal
-and run `ALTER INSTANCE RELOAD TLS` on each TiDB to pick up the new certificates.
+#### Migrating from `spec.topology.parameters.tls`
+
+Releases up to v0.3.0 took TLS as `spec.topology.parameters.tls` (`cluster`, `client`,
+`certManager`). Those fields are gone: an Instance that still carries them fails validation
+until it is moved. The TiDB cluster keeps running meanwhile.
+
+| Old settings | New |
+|---|---|
+| `cluster: true, client: true` | `mode: preferTLS` |
+| `cluster: true, client: false` | `mode: preferTLS` (TiDB restarts to serve MySQL TLS) |
+| `cluster: false, client: true` | `mode: disabled` (TiDB restarts without MySQL TLS) |
+| `cluster: false, client: false`, or no `tls` | `mode: disabled`, or leave it out |
+| `certManager.issuerRef: {name, kind}` | `issuer: {name, kind}` |
+| `certManager.enabled: true` without `issuerRef` | nothing: cert-manager is used while it is installed |
+
+TLS between components can't change on a running cluster, so `cluster: false` only maps to
+`disabled`. For example:
+
+```bash
+kubectl patch instance <instance> --type merge \
+  -p '{"spec":{"parameters":{"tls":{"mode":"preferTLS"}},"topology":{"parameters":null}}}'
+```
+
+Instances whose certificates the provider generated keep them; ones issued by cert-manager keep
+their issuer.
 
 ## Topologies
 
@@ -703,11 +771,13 @@ The Instance "orders" is invalid: spec.components[pd].replicas: Invalid value: 2
 
 - **Checked at admission:** the published parameter schemas, the version catalog and the
   provider's rules about the Instance itself: the name length, the required components, an odd
-  PD count, valid component versions in TiDB's upgrade order and the cert-manager settings.
+  PD count, valid component versions in TiDB's upgrade order and the TLS settings (mode,
+  issuer, DNS-only `additionalNames`; switching TLS on or off, or changing the issuer, of an
+  existing Instance).
 - **Checked against the running cluster:** changes the live TiDB groups cannot take (a
   downgrade, a TiKV scale-in below PD's `max-replicas`, a TiKV memory limit below the minimum, a
-  smaller volume, new TLS settings) and cert-manager's CRDs when `tls.certManager` asks for
-  them. These never block a write: at admission they are
+  smaller volume, turning TLS on or off, a new issuer) and cert-manager's CRDs when
+  `tls.issuer` asks for them. These never block a write: at admission they are
   warnings, which `kubectl` prints, and the provider then holds the change back, reporting it in
   the `Instance`'s `Ready` condition with reason `InvalidReference` until it is reverted or the
   CRD is installed.

@@ -17,60 +17,71 @@ import (
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
-	"github.com/openeverest/provider-tidb/definition/topologies/cluster"
+	"github.com/openeverest/provider-tidb/definition"
 	"github.com/openeverest/provider-tidb/internal/common"
 )
 
 const (
 	// tlsSourceAnnotation records on the Cluster where its certificates come
-	// from, so a change of source after creation can be rejected.
+	// from, chosen when it is created: "provider" (a CA the provider keeps in
+	// a Secret), "cert-manager" (a CA the provider sets up in cert-manager)
+	// or "cert-manager:<Kind>[.<group>]/<name>" (the user's issuer).
 	tlsSourceAnnotation = "tidb.openeverest.io/tls-certificates"
 	tlsSourceProvider   = "provider"
 	tlsSourceCertMgr    = "cert-manager"
-
-	issuerKindIssuer        = "Issuer"
-	issuerKindClusterIssuer = "ClusterIssuer"
 )
 
-// usesCertManager reports whether cert-manager issues the certificates.
-func usesCertManager(settings cluster.TLS) bool {
-	cm := settings.CertManager
-	return cm != nil && (cm.Enabled || (cm.IssuerRef != nil && cm.IssuerRef.Name != ""))
-}
-
-// tlsSource names where the certificates come from, or "" without TLS:
-// "provider", "cert-manager" (a CA the provider sets up in cert-manager) or
-// "cert-manager:<Kind>/<name>" (the user's issuer).
-func tlsSource(settings cluster.TLS) string {
+// newTLSSource picks the certificate source for a new Cluster: the issuer,
+// otherwise a managed CA, through cert-manager when it is installed.
+func newTLSSource(c *controller.Context, params definition.TLSParameters) (string, error) {
 	switch {
-	case !settings.Cluster && !settings.Client:
-		return ""
-	case !usesCertManager(settings):
-		return tlsSourceProvider
+	case !tlsEnabled(params):
+		return "", nil
+	case params.Issuer != nil:
+		return issuerSource(*params.Issuer), nil
 	}
-	if ref := settings.CertManager.IssuerRef; ref != nil && ref.Name != "" {
-		return fmt.Sprintf("%s:%s/%s", tlsSourceCertMgr, issuerKind(ref), ref.Name)
+	installed, err := certManagerInstalled(c)
+	if err != nil {
+		return "", err
 	}
-	return tlsSourceCertMgr
+	if installed {
+		return tlsSourceCertMgr, nil
+	}
+	return tlsSourceProvider, nil
 }
 
-// currentTLSSource reads the source recorded on an existing Cluster. Clusters
-// created before it was recorded issued their certificates in the provider.
-func currentTLSSource(cl *tidbcorev1.Cluster, hasTLS bool) string {
+// currentTLSSource reads the source recorded on an existing Cluster with TLS.
+// Clusters created before it was recorded issued their certificates in the
+// provider.
+func currentTLSSource(cl *tidbcorev1.Cluster) string {
 	if source := cl.Annotations[tlsSourceAnnotation]; source != "" {
 		return source
 	}
-	if hasTLS {
-		return tlsSourceProvider
-	}
-	return ""
+	return tlsSourceProvider
 }
 
-func issuerKind(ref *cluster.IssuerRef) string {
-	if ref.Kind == "" {
-		return issuerKindIssuer
+// issuerSource names the user's issuer. Issuers of cert-manager.io leave out
+// the group, as the provider recorded them before external issuers.
+func issuerSource(ref definition.IssuerReference) string {
+	kind := issuerKind(ref)
+	if group := issuerGroup(ref); group != cmapi.SchemeGroupVersion.Group {
+		kind += "." + group
 	}
-	return ref.Kind
+	return fmt.Sprintf("%s:%s/%s", tlsSourceCertMgr, kind, ref.Name)
+}
+
+func issuerKind(ref definition.IssuerReference) string {
+	if ref.Kind == "" {
+		return string(definition.IssuerKindIssuer)
+	}
+	return string(ref.Kind)
+}
+
+func issuerGroup(ref definition.IssuerReference) string {
+	if ref.Group == "" {
+		return cmapi.SchemeGroupVersion.Group
+	}
+	return ref.Group
 }
 
 func selfSignedIssuerName(instance string) string {
@@ -81,35 +92,28 @@ func caIssuerName(instance string) string {
 	return instance + "-tls-ca"
 }
 
-// validateCertManager checks the cert-manager settings: they need TLS and an
-// issuer kind cert-manager knows.
-func validateCertManager(settings cluster.TLS) error {
-	if !usesCertManager(settings) {
-		return nil
-	}
-	if !settings.Cluster && !settings.Client {
-		return fmt.Errorf("tls.certManager issues certificates for tls.cluster or tls.client; turn on at least one")
-	}
-	if ref := settings.CertManager.IssuerRef; ref != nil && ref.Name != "" {
-		if kind := issuerKind(ref); kind != issuerKindIssuer && kind != issuerKindClusterIssuer {
-			return fmt.Errorf("tls.certManager.issuerRef.kind %q must be %s or %s", ref.Kind, issuerKindIssuer, issuerKindClusterIssuer)
-		}
-	}
-	return nil
-}
-
-// validateCertManagerCRD checks that cert-manager is installed when
-// tls.certManager asks for it.
-func validateCertManagerCRD(c *controller.Context, settings cluster.TLS) error {
-	if !usesCertManager(settings) {
-		return nil
-	}
+// certManagerInstalled reports whether the cert-manager Certificate CRD is
+// installed.
+func certManagerInstalled(c *controller.Context) (bool, error) {
 	gvk := cmapi.SchemeGroupVersion.WithKind(cmapi.CertificateKind)
 	if _, err := c.Client().RESTMapper().RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
 		if meta.IsNoMatchError(err) {
-			return fmt.Errorf("tls.certManager requires cert-manager: the Certificate CRD (%s) is not installed", gvk.GroupVersion())
+			return false, nil
 		}
-		return fmt.Errorf("look up the Certificate CRD: %w", err)
+		return false, fmt.Errorf("look up the Certificate CRD: %w", err)
+	}
+	return true, nil
+}
+
+// validateCertManagerCRD checks that cert-manager is installed for the issuer.
+func validateCertManagerCRD(c *controller.Context) error {
+	installed, err := certManagerInstalled(c)
+	if err != nil {
+		return err
+	}
+	if !installed {
+		return fmt.Errorf("issuer requires cert-manager: the Certificate CRD (%s) is not installed",
+			cmapi.SchemeGroupVersion)
 	}
 	return nil
 }
@@ -117,8 +121,8 @@ func validateCertManagerCRD(c *controller.Context, settings cluster.TLS) error {
 // ensureCertManagerCertificates has cert-manager issue every certificate into
 // the Secrets the operator mounts, signed by the user's issuer or by a CA the
 // provider sets up in cert-manager for the Instance.
-func ensureCertManagerCertificates(c *controller.Context, owner *tidbcorev1.Cluster, settings cluster.TLS, leaves []leafCert) error {
-	issuer, err := ensureCertManagerIssuer(c, owner, settings.CertManager.IssuerRef)
+func ensureCertManagerCertificates(c *controller.Context, owner *tidbcorev1.Cluster, ref *definition.IssuerReference, leaves []leafCert) error {
+	issuer, err := ensureCertManagerIssuer(c, owner, ref)
 	if err != nil {
 		return err
 	}
@@ -136,9 +140,9 @@ func ensureCertManagerCertificates(c *controller.Context, owner *tidbcorev1.Clus
 // ensureCertManagerIssuer returns the issuer that signs the certificates. Without
 // a user issuer it applies a self-signed issuer, a CA certificate signed by it,
 // and a CA issuer backed by that certificate.
-func ensureCertManagerIssuer(c *controller.Context, owner *tidbcorev1.Cluster, ref *cluster.IssuerRef) (cmmeta.IssuerReference, error) {
-	if ref != nil && ref.Name != "" {
-		return cmmeta.IssuerReference{Name: ref.Name, Kind: issuerKind(ref), Group: cmapi.SchemeGroupVersion.Group}, nil
+func ensureCertManagerIssuer(c *controller.Context, owner *tidbcorev1.Cluster, ref *definition.IssuerReference) (cmmeta.IssuerReference, error) {
+	if ref != nil {
+		return cmmeta.IssuerReference{Name: ref.Name, Kind: issuerKind(*ref), Group: issuerGroup(*ref)}, nil
 	}
 
 	selfSigned := &cmapi.Issuer{
@@ -157,7 +161,7 @@ func ensureCertManagerIssuer(c *controller.Context, owner *tidbcorev1.Cluster, r
 			SecretName: tlsCASecretName(c.Name()),
 			Duration:   &metav1.Duration{Duration: tlsCertValidity},
 			IssuerRef: cmmeta.IssuerReference{
-				Name: selfSignedIssuerName(c.Name()), Kind: issuerKindIssuer, Group: cmapi.SchemeGroupVersion.Group,
+				Name: selfSignedIssuerName(c.Name()), Kind: string(definition.IssuerKindIssuer), Group: cmapi.SchemeGroupVersion.Group,
 			},
 		},
 	}
@@ -174,7 +178,7 @@ func ensureCertManagerIssuer(c *controller.Context, owner *tidbcorev1.Cluster, r
 	if err := applyOwnedByCluster(c, owner, caIssuer); err != nil {
 		return cmmeta.IssuerReference{}, fmt.Errorf("apply CA issuer: %w", err)
 	}
-	return cmmeta.IssuerReference{Name: caIssuerName(c.Name()), Kind: issuerKindIssuer, Group: cmapi.SchemeGroupVersion.Group}, nil
+	return cmmeta.IssuerReference{Name: caIssuerName(c.Name()), Kind: string(definition.IssuerKindIssuer), Group: cmapi.SchemeGroupVersion.Group}, nil
 }
 
 // buildCertificate asks for the same certificate the provider would issue
