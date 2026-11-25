@@ -6,8 +6,10 @@ $(LOCALBIN):
 # CONTAINER_TOOL defines the container tool to be used for building images.
 CONTAINER_TOOL ?= docker
 
-# OpenEverest branch to use for OpenEverest CRD installation.
-OPENEVEREST_BRANCH ?= v2.0.0-alpha.1
+# Ref of openeverest/openeverest to install the OpenEverest CRDs from: the
+# commit go.mod pins (its tag, or the commit of a pseudo-version). Move them
+# together.
+OPENEVEREST_BRANCH ?= e7eb057b51cb7bbc6c803161ef530dc1cb8e9b08
 
 # TiDB Operator (v2) version whose CRDs and image the provider targets.
 OPERATOR_VERSION ?= v2.0.1
