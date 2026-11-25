@@ -1,0 +1,15 @@
+# A second backup, taken with the default deletionPolicy (Delete) and switched
+# to Retain afterwards: deleting it must keep its data.
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+metadata:
+  name: e2e-retained
+spec:
+  origin:
+    type: Instance
+    instanceRef:
+      name: test-instance
+  classRef:
+    name: br
+  storageRef:
+    name: s3-store

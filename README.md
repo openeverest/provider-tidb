@@ -101,6 +101,7 @@ Stateful components (PD, TiKV, TiFlash) additionally report:
 | Backups (scheduled) | ✅ | Cron schedules per storage with count or time retention (see below) |
 | Point-in-time recovery | ✅ | Continuous log backup to one storage; restore a point of it into a new Instance (see [Point-in-time recovery](#point-in-time-recovery)) |
 | Restore | ✅ | Into an existing Instance, or seed a new one via `spec.dataSource` |
+| Backup deletion | ✅ | Deleting a `Backup` removes its data from the storage, or keeps it with `deletionPolicy: Retain` (see below) |
 
 See [ROADMAP.md](ROADMAP.md) for the planned work.
 
@@ -157,6 +158,14 @@ See [ROADMAP.md](ROADMAP.md) for the planned work.
 > the N newest successful backups, and `time` keeps everything inside the window plus the newest
 > successful backup. Pruned backups follow their own `deletionPolicy`. An invalid cron expression
 > sets the `BackupConfigured` condition to `False` with reason `BackupScheduleInvalid`.
+
+> [!NOTE]
+> Deleting a `Backup` follows its `deletionPolicy` at the time of deletion, so it can be switched
+> on a live `Backup`. With `Delete` (the default) TiDB Operator runs a clean job that removes the
+> backup's folder from the storage, and the `Backup` stays `Deleting` until it has. With `Retain`
+> the data stays where it is. Delete the backups you no longer need before their `Instance`: a
+> `Backup` whose `Instance` is gone can't be deleted yet
+> ([openeverest/openeverest#3373](https://github.com/openeverest/openeverest/issues/3373)).
 
 ## Installation
 
@@ -868,6 +877,7 @@ kubectl logs -n everest-system deploy/provider-tidb -f
 | Groups created but no pods | Inspect the group/instance status (`kubectl get tidbgroup,tikvgroup,pdgroup`) — the failure is upstream in the operator |
 | Storage size raised but PVCs unchanged | The StorageClass must allow volume expansion; check `kubectl get pvc` and the operator logs |
 | An edit is applied with a `Warning:` and nothing changes | The provider holds the change back; the `Instance`'s `Ready` condition (reason `InvalidReference`) says why. Typical causes: shrinking storage, a downgrade, scaling TiKV below PD's `max-replicas`, changing TLS after creation, or cert-manager's CRDs not being installed. Revert the change, or install the CRD; see [Validation](#validation) |
+| `Backup` stays `Deleting` | The clean job failed to remove its data (the provider logs say why) and TiDB Operator doesn't retry it. Remove the backup's folder from the storage by hand, then `kubectl patch backups.br.pingcap.com <name> --type=json -p '[{"op":"remove","path":"/metadata/finalizers"}]'` |
 | `Backup` or `Restore` stays `Running` | `kubectl get jobs` in the Instance's namespace and the BR job's pod logs; the BR `Backup`/`Restore` (`backups.br.pingcap.com`) conditions carry the reason |
 | TiProxy runs but does not migrate sessions | `kubectl get cluster.core.pingcap.com <instance> -o jsonpath='{.spec.featureGates}'` must list `SessionTokenSigning`. On an existing Instance the provider adds it only once every TiDB instance lists `FeatureModification` (`kubectl get tidb -o jsonpath='{.items[*].spec.features}'`); see [TiProxy](#tiproxy) |
 | TiKV pods restart with `OOMKilled`, or writes fail with `tikv disk full` early | The TiKV memory limit or volume is too small; see [TiKV memory and disk](#tikv-memory-and-disk) |

@@ -1,0 +1,6 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+metadata:
+  name: e2e-retained
+spec:
+  deletionPolicy: Retain
