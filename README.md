@@ -889,6 +889,7 @@ and the [OpenEverest Code of Conduct](https://github.com/openeverest/openeverest
 Report vulnerabilities per the
 [OpenEverest security policy](https://github.com/openeverest/openeverest/blob/main/SECURITY.md).
 Please do not open public issues for security reports.
+| New provider pod running but never `Ready` | It waits until the installed OpenEverest supports this build: the Warning Event in `kubectl describe provider tidb` says why |
 
 ## License
 
