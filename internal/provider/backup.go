@@ -284,23 +284,24 @@ func (p *Provider) CleanupBackup(c *controller.Context, backup *backupv1alpha1.B
 }
 
 // alignCleanPolicy makes TiDB Operator delete brBackup's data with it exactly
-// when backup's deletionPolicy asks to. Under Delete it also sets the
+// when backup's deletionPolicy asks to. Switching to Delete also sets the
 // operator's finalizer, which the operator adds only on its next pass, so a
-// BR Backup deleted right after its policy changed still holds for the clean
-// job. Under Retain it drops the finalizer, which the operator would never
-// release.
+// BR Backup deleted right after the switch still holds for the clean job.
+// Under Retain it drops the finalizer, which the operator would never release.
 func alignCleanPolicy(c *controller.Context, backup *backupv1alpha1.Backup, brBackup *tidbbrv1.Backup) error {
 	want := cleanPolicyFor(c, backup)
-	changed := brBackup.Spec.CleanPolicy != want
-	brBackup.Spec.CleanPolicy = want
-	if want == tidbbrv1.CleanPolicyTypeRetain {
-		changed = controllerutil.RemoveFinalizer(brBackup, brFinalizer) || changed
-	} else {
-		changed = controllerutil.AddFinalizer(brBackup, brFinalizer) || changed
-	}
-	if !changed {
+	switch {
+	case want == tidbbrv1.CleanPolicyTypeRetain:
+		changed := controllerutil.RemoveFinalizer(brBackup, brFinalizer)
+		if !changed && brBackup.Spec.CleanPolicy == want {
+			return nil
+		}
+	case brBackup.Spec.CleanPolicy == want:
 		return nil
+	default:
+		controllerutil.AddFinalizer(brBackup, brFinalizer)
 	}
+	brBackup.Spec.CleanPolicy = want
 	if err := c.Client().Update(c.Context(), brBackup); err != nil {
 		return fmt.Errorf("update clean policy of BR backup: %w", err)
 	}
