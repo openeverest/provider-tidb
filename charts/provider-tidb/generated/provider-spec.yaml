@@ -205,6 +205,7 @@ spec:
                   minimum: 1
                 resources: {}
                 schedulingPolicy: {}
+                service: {}
         tiflash:
           optional: true
           supportedFields:
@@ -237,6 +238,7 @@ spec:
                   minimum: 0
                 resources: {}
                 schedulingPolicy: {}
+                service: {}
   uiSchema:
     cluster:
       sections:
@@ -456,6 +458,19 @@ spec:
           components:
             tidbGroup:
               components:
+                externalAccess:
+                  fieldParams:
+                    defaultValue: ClusterIP
+                    label: External access
+                    options:
+                      - label: ClusterIP (in-cluster only)
+                        value: ClusterIP
+                      - label: LoadBalancer
+                        value: LoadBalancer
+                      - label: NodePort
+                        value: NodePort
+                  path: spec.components.tidb.service.serviceType
+                  uiType: select
                 replicas:
                   fieldParams:
                     defaultValue: 2
@@ -495,6 +510,7 @@ spec:
               componentsOrder:
                 - replicas
                 - resources
+                - externalAccess
               uiType: group
           description: Stateless SQL nodes that speak the MySQL protocol.
           label: SQL Layer (TiDB)
@@ -649,6 +665,19 @@ spec:
           components:
             tiproxyGroup:
               components:
+                externalAccess:
+                  fieldParams:
+                    defaultValue: ClusterIP
+                    label: External access
+                    options:
+                      - label: ClusterIP (in-cluster only)
+                        value: ClusterIP
+                      - label: LoadBalancer
+                        value: LoadBalancer
+                      - label: NodePort
+                        value: NodePort
+                  path: spec.components.tiproxy.service.serviceType
+                  uiType: select
                 replicas:
                   fieldParams:
                     defaultValue: 0
@@ -688,6 +717,7 @@ spec:
               componentsOrder:
                 - replicas
                 - resources
+                - externalAccess
               uiType: group
           description: Optional proxy in front of TiDB. It balances sessions across the TiDB nodes and keeps client connections open while TiDB nodes are added, removed or restarted. Turning it on or off changes the connection endpoint.
           label: Connection proxy (TiProxy)
