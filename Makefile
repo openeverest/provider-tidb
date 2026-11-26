@@ -6,8 +6,10 @@ $(LOCALBIN):
 # CONTAINER_TOOL defines the container tool to be used for building images.
 CONTAINER_TOOL ?= docker
 
-# OpenEverest branch to use for OpenEverest CRD installation.
-OPENEVEREST_BRANCH ?= v2.0.0-alpha.1
+# Ref of openeverest/openeverest to install the OpenEverest CRDs from: the
+# commit go.mod pins (its tag, or the commit of a pseudo-version). Move them
+# together.
+OPENEVEREST_BRANCH ?= e7eb057b51cb7bbc6c803161ef530dc1cb8e9b08
 
 # TiDB Operator (v2) version whose CRDs and image the provider targets.
 OPERATOR_VERSION ?= v2.0.1
@@ -95,16 +97,22 @@ generate: manifests helm-sync-rbac ## Run all code generation (RBAC + Helm sync 
 	go generate ./...
 	@echo "All generation complete."
 
+GENERATED_PATHS = config/ definition/ $(CHART_DIR)/generated/ $(CHART_DIR)/Chart.yaml \
+	$(CHART_DIR)/templates/_openeverest_contract.tpl \
+	$(CHART_DIR)/templates/openeverest-compat-check.yaml
+
 .PHONY: verify
-verify: ## Verify that generated files are up-to-date (for CI).
+verify: ## Verify that generated files are up-to-date and the chart is stamped with the OpenEverest it is built against (for CI).
 	@$(MAKE) generate
-	@if git diff --quiet -- config/ definition/ $(CHART_DIR)/generated/; then \
+	@if [ -z "$$(git status --porcelain -- $(GENERATED_PATHS))" ]; then \
 		echo "Generated files are up-to-date."; \
 	else \
 		echo "ERROR: Generated files are out of date. Run 'make generate' and commit the changes."; \
-		git diff -- config/ definition/ $(CHART_DIR)/generated/; \
+		git status --short -- $(GENERATED_PATHS); \
+		git diff -- $(GENERATED_PATHS); \
 		exit 1; \
 	fi
+	go tool provider-sdk verify --chart-dir $(CHART_DIR)
 
 ##@ Build
 

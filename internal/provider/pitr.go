@@ -17,6 +17,7 @@ import (
 	backupv1alpha1 "github.com/openeverest/openeverest/v2/api/backup/v1alpha1"
 	commonv1alpha1 "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
+	"github.com/openeverest/openeverest/v2/contract/referents"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbbrv1 "github.com/pingcap/tidb-operator/api/v2/br/v1alpha1"
@@ -403,7 +404,7 @@ func formatTS(ts uint64) string {
 // this Instance's cluster: BR restores the newest full backup at or before the
 // point, then replays the log up to it.
 func syncPointInTimeRestore(c *controller.Context, restore *backupv1alpha1.Restore) (controller.RestoreExecutionStatus, error) {
-	source := controller.RestoreStreamInstanceName(restore)
+	source := referents.RestoreStreamInstanceName(restore)
 	if source == c.Name() {
 		return controller.RestoreExecutionStatus{
 			State: backupv1alpha1.RestoreStateFailed,

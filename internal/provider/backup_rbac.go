@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 
+	"github.com/openeverest/openeverest/v2/contract"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-tidb/internal/common"
@@ -47,7 +48,7 @@ func ensureBackupManagerRBAC(c *controller.Context, namespace string) error {
 		Namespace: namespace,
 		Labels: map[string]string{
 			"app.kubernetes.io/managed-by": "everest",
-			controller.ProviderLabel:       common.ProviderName,
+			contract.ProviderLabel:         common.ProviderName,
 		},
 	}
 	objs := []client.Object{

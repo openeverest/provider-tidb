@@ -79,6 +79,13 @@ All settings live in `dev/.env` (see `dev/.env.example`). Common options:
 > Helm's default "latest" resolution skips — it would install v1, whose CRDs a v2
 > provider cannot use. `OPENEVEREST_VERSION` therefore defaults to a constraint
 > rather than being empty. Override it to pin an exact version.
+>
+> While `go.mod` requires a commit of core `main` whose contract has changed since
+> the last release, the chart's stamp is a development value, such as
+> `2.0.0-alpha.1.next`, and no released core serves this provider: the chart
+> refuses to install on one, and the provider would stay unready there. Run the
+> core from that commit instead (`OPENEVEREST_BRANCH` in the `Makefile` names
+> it), as described below.
 
 ## Developing the core and the provider together
 

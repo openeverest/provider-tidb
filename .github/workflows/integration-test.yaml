@@ -37,8 +37,10 @@ permissions:
 
 env:
   IMG: provider-tidb:ci
-  # Branch of openeverest/openeverest to build the platform from.
-  OPENEVEREST_BRANCH: v2.0.0-alpha.1
+  # Ref of openeverest/openeverest to build the platform from: the commit
+  # go.mod pins (its tag, or the commit of a pseudo-version). Move them
+  # together.
+  OPENEVEREST_BRANCH: e7eb057b51cb7bbc6c803161ef530dc1cb8e9b08
 
 jobs:
   run:

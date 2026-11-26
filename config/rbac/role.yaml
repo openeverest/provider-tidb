@@ -56,6 +56,14 @@ rules:
   - create
   - patch
 - apiGroups:
+  - apiextensions.k8s.io
+  resourceNames:
+  - providers.core.openeverest.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+- apiGroups:
   - backup.openeverest.io
   resources:
   - backupclasses
@@ -168,6 +176,14 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - core.openeverest.io
+  resourceNames:
+  - tidb
+  resources:
+  - providers/status
+  verbs:
+  - patch
 - apiGroups:
   - core.pingcap.com
   resources:

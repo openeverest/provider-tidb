@@ -16,6 +16,7 @@ import (
 	backupv1alpha1 "github.com/openeverest/openeverest/v2/api/backup/v1alpha1"
 	commonv1alpha1 "github.com/openeverest/openeverest/v2/api/common/v1alpha1"
 	s3class "github.com/openeverest/openeverest/v2/backupstorageclasses/s3"
+	"github.com/openeverest/openeverest/v2/contract/referents"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbbrv1 "github.com/pingcap/tidb-operator/api/v2/br/v1alpha1"
@@ -342,7 +343,7 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 		}
 		return controller.RestoreExecutionStatus{}, fmt.Errorf("get source backup: %w", err)
 	}
-	if err := controller.ValidateBackupSucceeded(srcBackup); err != nil {
+	if err := referents.ValidateBackupSucceeded(srcBackup); err != nil {
 		return controller.RestoreExecutionStatus{
 			State:   backupv1alpha1.RestoreStatePending,
 			Message: "Waiting for source backup to succeed",

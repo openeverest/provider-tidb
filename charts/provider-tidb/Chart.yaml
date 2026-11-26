@@ -22,3 +22,5 @@ dependencies:
     version: "v2.0.1"
     repository: oci://ghcr.io/pingcap/charts
     condition: operator.enabled
+annotations:
+  openeverest.io/contract-version: "2.0.0-alpha.1.next"
