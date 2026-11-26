@@ -84,31 +84,45 @@ func exposed(svc *corev1alpha1.Service) bool {
 // syncExternalServices creates or updates the external Service of each SQL
 // component that runs and asks for LoadBalancer or NodePort access, and
 // deletes it otherwise: back to ClusterIP, or the component (TiProxy) turned off.
-func syncExternalServices(c *controller.Context) error {
+//
+// A LoadBalancer Service switched to NodePort is deleted and created again
+// rather than updated: some cloud controllers (Linode's, for one) keep the
+// cloud load balancer when a Service only changes its type, while all of them
+// release it when the Service is deleted. pending reports that a Service is
+// still being deleted before it is created again.
+func syncExternalServices(c *controller.Context) (pending bool, err error) {
 	comps := c.Instance().Spec.Components
 	for _, component := range exposedComponents {
 		comp, running := comps[component], true
 		if component == common.ComponentTiProxy {
 			comp, running = enabledTiProxy(comps)
 		}
-		if running && exposed(comp.Service) {
-			if err := c.Apply(buildExternalService(c, endpointOf(component), comp.Service)); err != nil {
-				return fmt.Errorf("apply %s external service: %w", component, err)
-			}
-			continue
-		}
+		want := running && exposed(comp.Service)
 		svc := &corev1.Service{}
 		found, err := c.Exists(svc, externalServiceName(c.Name(), component))
 		if err != nil {
-			return fmt.Errorf("get %s external service: %w", component, err)
+			return false, fmt.Errorf("get %s external service: %w", component, err)
+		}
+		if found && svc.DeletionTimestamp != nil {
+			pending = pending || want
+			continue
+		}
+		recreate := found && want && svc.Spec.Type == corev1.ServiceTypeLoadBalancer &&
+			comp.Service.ServiceType != corev1.ServiceTypeLoadBalancer
+		if want && !recreate {
+			if err := c.Apply(buildExternalService(c, endpointOf(component), comp.Service)); err != nil {
+				return false, fmt.Errorf("apply %s external service: %w", component, err)
+			}
+			continue
 		}
 		if found {
 			if err := c.Delete(svc); err != nil {
-				return fmt.Errorf("delete %s external service: %w", component, err)
+				return false, fmt.Errorf("delete %s external service: %w", component, err)
 			}
+			pending = pending || recreate
 		}
 	}
-	return nil
+	return pending, nil
 }
 
 // buildExternalService exposes only the MySQL client port: the status and API

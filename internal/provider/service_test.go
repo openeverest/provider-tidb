@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
+	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	tidbcorev1 "github.com/pingcap/tidb-operator/api/v2/core/v1alpha1"
 
@@ -23,6 +24,15 @@ func withService(in *corev1alpha1.Instance, component string, svc *corev1alpha1.
 	return in
 }
 
+// syncServices runs syncExternalServices and reports whether it waits for a
+// Service to be deleted.
+func syncServices(t *testing.T, c *controller.Context) bool {
+	t.Helper()
+	pending, err := syncExternalServices(c)
+	assertError(t, err, "")
+	return pending
+}
+
 func TestSyncExternalServices(t *testing.T) {
 	in := withService(testInstance("8.5.2"), common.ComponentTiDB, &corev1alpha1.Service{
 		ServiceType: corev1.ServiceTypeLoadBalancer,
@@ -33,7 +43,7 @@ func TestSyncExternalServices(t *testing.T) {
 	})
 	c, _ := tiproxyContext(t, in, nil)
 
-	assertError(t, syncExternalServices(c), "")
+	syncServices(t, c)
 
 	svc := &corev1.Service{}
 	if err := c.Get(svc, "orders-tidb-external"); err != nil {
@@ -60,9 +70,26 @@ func TestSyncExternalServices(t *testing.T) {
 		t.Error("TiProxy is not exposed, yet has an external service")
 	}
 
+	// LoadBalancer to NodePort: deleted first, so the cloud load balancer is
+	// released, then created again as NodePort.
+	withService(in, common.ComponentTiDB, &corev1alpha1.Service{ServiceType: corev1.ServiceTypeNodePort})
+	if !syncServices(t, c) {
+		t.Error("switching to NodePort did not wait for the LoadBalancer Service to be deleted")
+	}
+	if found, err := c.Exists(&corev1.Service{}, "orders-tidb-external"); err != nil || found {
+		t.Fatalf("LoadBalancer Service not deleted before NodePort (err %v)", err)
+	}
+	if syncServices(t, c) {
+		t.Error("still pending once the LoadBalancer Service is gone")
+	}
+	svc = &corev1.Service{}
+	if err := c.Get(svc, "orders-tidb-external"); err != nil || svc.Spec.Type != corev1.ServiceTypeNodePort {
+		t.Fatalf("external TiDB service = %s (err %v), want NodePort", svc.Spec.Type, err)
+	}
+
 	// Back to in-cluster only: the external service goes.
 	withService(in, common.ComponentTiDB, &corev1alpha1.Service{ServiceType: corev1.ServiceTypeClusterIP})
-	assertError(t, syncExternalServices(c), "")
+	syncServices(t, c)
 	if found, err := c.Exists(&corev1.Service{}, "orders-tidb-external"); err != nil || found {
 		t.Fatalf("external TiDB service still exists (err %v)", err)
 	}
@@ -73,7 +100,7 @@ func TestSyncExternalServicesTiProxy(t *testing.T) {
 		&corev1alpha1.Service{ServiceType: corev1.ServiceTypeNodePort})
 	c, _ := tiproxyContext(t, in, nil)
 
-	assertError(t, syncExternalServices(c), "")
+	syncServices(t, c)
 	svc := &corev1.Service{}
 	if err := c.Get(svc, "orders-tiproxy-external"); err != nil {
 		t.Fatalf("external TiProxy service: %v", err)
@@ -87,7 +114,7 @@ func TestSyncExternalServicesTiProxy(t *testing.T) {
 	comp := in.Spec.Components[common.ComponentTiProxy]
 	comp.Replicas = ptrTo(int32(0))
 	in.Spec.Components[common.ComponentTiProxy] = comp
-	assertError(t, syncExternalServices(c), "")
+	syncServices(t, c)
 	if found, err := c.Exists(&corev1.Service{}, "orders-tiproxy-external"); err != nil || found {
 		t.Fatalf("external TiProxy service still exists (err %v)", err)
 	}

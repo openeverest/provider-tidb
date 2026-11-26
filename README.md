@@ -367,9 +367,11 @@ Either way `internal_host` and `internal_port` keep the in-cluster endpoint. Exp
 TiProxy runs is allowed, with a warning: the connection Secret keeps pointing at TiProxy, and
 external clients bypass it.
 
-With [TLS](#security), the certificates name only the in-cluster Services. Add the DNS name clients
-use (e.g. a record pointing at the LoadBalancer) to `spec.parameters.tls.additionalNames` so they can
-verify it; IP addresses can't be added.
+With [TLS](#security), the certificates name only the in-cluster Services, so clients that verify
+the hostname reject the external address. Add the DNS name they use (the LoadBalancer hostname, or
+your own record pointing at it) to `spec.parameters.tls.additionalNames`; IP addresses can't be
+added. On a running Instance that reissues the certificates and restarts TiDB once you approve the
+maintenance.
 
 ### Backup storages
 
