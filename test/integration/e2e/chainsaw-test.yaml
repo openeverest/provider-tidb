@@ -11,7 +11,7 @@ spec:
     Create an Instance, wait for the operator to bring up PD/TiKV/TiDB pods,
     run SELECT 1 with the connection-secret credentials, scale TiKV out and
     back in without losing data, back the data up to an in-cluster S3 and
-    restore it, then delete.
+    restore it, delete backups under each deletion policy, then delete.
 
   # Image pulls and first cluster bootstrap take minutes, not seconds.
   timeouts:
@@ -196,6 +196,63 @@ spec:
               echo "rows after restore: $rows"
               [ "$rows" = "$(printf '1000\t500500')" ]
               sql "ADMIN CHECK TABLE e2e.rows;"
+
+    - name: delete-backups
+      try:
+        - apply:
+            file: 75-backup.yaml
+        - assert:
+            file: 75-assert.yaml
+        - patch:
+            file: 76-retain.yaml
+        - assert:
+            file: 76-assert.yaml
+        - apply:
+            file: 77-s3-shell.yaml
+        - assert:
+            file: 77-assert.yaml
+        - script:
+            content: |
+              set -e
+              objects=$(kubectl -n $NAMESPACE exec s3-shell -- aws --endpoint-url http://s3:9000 s3 ls --recursive s3://e2e-backups/)
+              echo "$objects"
+              echo "$objects" | grep -q '/e2e-backup/'
+              echo "$objects" | grep -q '/e2e-retained/'
+        - delete:
+            ref:
+              apiVersion: backup.openeverest.io/v1alpha1
+              kind: Backup
+              name: e2e-retained
+        - wait:
+            apiVersion: backup.openeverest.io/v1alpha1
+            kind: Backup
+            name: e2e-retained
+            timeout: 5m
+            for:
+              deletion: {}
+        # Delete waits for TiDB Operator's clean job to empty the folder.
+        - delete:
+            ref:
+              apiVersion: backup.openeverest.io/v1alpha1
+              kind: Backup
+              name: e2e-backup
+        - wait:
+            apiVersion: backup.openeverest.io/v1alpha1
+            kind: Backup
+            name: e2e-backup
+            timeout: 5m
+            for:
+              deletion: {}
+        - script:
+            content: |
+              set -e
+              objects=$(kubectl -n $NAMESPACE exec s3-shell -- aws --endpoint-url http://s3:9000 s3 ls --recursive s3://e2e-backups/)
+              echo "$objects"
+              if echo "$objects" | grep '/e2e-backup/'; then echo "e2e-backup left data behind"; exit 1; fi
+              echo "$objects" | grep -q '/e2e-retained/'
+      catch:
+        - script:
+            content: kubectl -n $NAMESPACE logs -l app.kubernetes.io/component=clean --tail=100 --prefix || true
 
     - name: delete-instance
       try:

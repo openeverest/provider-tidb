@@ -1,0 +1,8 @@
+# The BR Backup follows the policy and no longer waits for a clean.
+apiVersion: br.pingcap.com/v1alpha1
+kind: Backup
+metadata:
+  name: e2e-retained
+  (contains(finalizers || `[]`, 'pingcap.com/finalizer')): false
+spec:
+  cleanPolicy: Retain

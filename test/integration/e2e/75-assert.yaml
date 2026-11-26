@@ -1,0 +1,16 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Backup
+metadata:
+  name: e2e-retained
+status:
+  state: Succeeded
+---
+# Taken under Delete: TiDB Operator holds it to clean its data.
+apiVersion: br.pingcap.com/v1alpha1
+kind: Backup
+metadata:
+  name: e2e-retained
+  finalizers:
+    - pingcap.com/finalizer
+spec:
+  cleanPolicy: Delete

@@ -1,0 +1,14 @@
+# Lists the test bucket to check which backups' data is still there.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s3-shell
+spec:
+  containers:
+    - name: aws
+      image: amazon/aws-cli:2.27.0
+      command: ["sleep", "infinity"]
+      env:
+        - {name: AWS_ACCESS_KEY_ID, value: test-access-key}
+        - {name: AWS_SECRET_ACCESS_KEY, value: test-secret-key}
+        - {name: AWS_DEFAULT_REGION, value: us-east-1}

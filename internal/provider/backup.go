@@ -164,6 +164,13 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 		return controller.BackupExecutionStatus{}, fmt.Errorf("get BR backup: %w", err)
 	}
 	if found {
+		// deletionPolicy may change on a live Backup. Keeping BR's copy current
+		// also covers deletions that bypass CleanupBackup, such as the namespace's.
+		if existing.DeletionTimestamp.IsZero() {
+			if err := alignCleanPolicy(c, backup, existing); err != nil {
+				return controller.BackupExecutionStatus{}, err
+			}
+		}
 		return brBackupExecutionStatus(existing), nil
 	}
 
@@ -218,7 +225,7 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 			ServiceAccount:  backupManagerName,
 			Type:            tidbbrv1.BackupTypeFull,
 			Mode:            tidbbrv1.BackupModeSnapshot,
-			CleanPolicy:     cleanPolicyFor(backup.Spec.DeletionPolicy),
+			CleanPolicy:     cleanPolicyFor(c, backup),
 			StorageProvider: tidbbrv1.StorageProvider{S3: rendered.s3},
 			BR:              &tidbbrv1.BRConfig{Cluster: c.Name(), ClusterNamespace: c.Namespace()},
 		},
@@ -233,9 +240,13 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 	return brBackupExecutionStatus(brBackup), nil
 }
 
-// CleanupBackup deletes the BR Backup CR. Whether the underlying S3 data is
-// removed is governed by the CleanPolicy set at creation from the Backup's
-// DeletionPolicy.
+// CleanupBackup deletes the BR Backup CR and reports done once it is gone,
+// following the Backup's deletionPolicy as it is now:
+//
+//   - Delete: TiDB Operator's finalizer holds the BR Backup until its clean job
+//     has removed the snapshot from the storage.
+//   - Retain: the finalizer is released, so the BR Backup goes and the
+//     snapshot stays.
 func (p *Provider) CleanupBackup(c *controller.Context, backup *backupv1alpha1.Backup) (bool, error) {
 	brBackup := &tidbbrv1.Backup{}
 	err := c.Get(brBackup, backup.Name)
@@ -246,11 +257,63 @@ func (p *Provider) CleanupBackup(c *controller.Context, backup *backupv1alpha1.B
 		return false, fmt.Errorf("get BR backup for cleanup: %w", err)
 	}
 	if brBackup.DeletionTimestamp.IsZero() {
-		if err := c.Delete(brBackup); err != nil {
+		if err := alignCleanPolicy(c, backup, brBackup); err != nil {
+			return false, err
+		}
+		if err := c.Delete(brBackup); client.IgnoreNotFound(err) != nil {
 			return false, fmt.Errorf("delete BR backup: %w", err)
 		}
+		return false, nil
+	}
+	if c.ShouldRetainBackupData(backup) {
+		// TiDB Operator only releases a BR Backup it cleans, which it no longer
+		// does once the policy said Retain.
+		if controllerutil.RemoveFinalizer(brBackup, brFinalizer) {
+			if err := c.Client().Update(c.Context(), brBackup); client.IgnoreNotFound(err) != nil {
+				return false, fmt.Errorf("release BR backup: %w", err)
+			}
+		}
+		return false, nil
+	}
+	if tidbbrv1.IsBackupCleanFailed(brBackup) {
+		// TiDB Operator doesn't retry: the Backup stays until the data is
+		// removed by hand and the BR Backup's finalizer released.
+		return false, fmt.Errorf("deleting the data of BR backup %s failed: %s", brBackup.Name, brCleanFailureMessage(brBackup))
 	}
 	return false, nil
+}
+
+// alignCleanPolicy makes TiDB Operator delete brBackup's data with it exactly
+// when backup's deletionPolicy asks to. Switching to Delete also sets the
+// operator's finalizer, which the operator adds only on its next pass, so a
+// BR Backup deleted right after the switch still holds for the clean job.
+// Under Retain it drops the finalizer, which the operator would never release.
+func alignCleanPolicy(c *controller.Context, backup *backupv1alpha1.Backup, brBackup *tidbbrv1.Backup) error {
+	want := cleanPolicyFor(c, backup)
+	switch {
+	case want == tidbbrv1.CleanPolicyTypeRetain:
+		changed := controllerutil.RemoveFinalizer(brBackup, brFinalizer)
+		if !changed && brBackup.Spec.CleanPolicy == want {
+			return nil
+		}
+	case brBackup.Spec.CleanPolicy == want:
+		return nil
+	default:
+		controllerutil.AddFinalizer(brBackup, brFinalizer)
+	}
+	brBackup.Spec.CleanPolicy = want
+	if err := c.Client().Update(c.Context(), brBackup); err != nil {
+		return fmt.Errorf("update clean policy of BR backup: %w", err)
+	}
+	return nil
+}
+
+// brCleanFailureMessage is why TiDB Operator failed to delete a backup's data.
+func brCleanFailureMessage(b *tidbbrv1.Backup) string {
+	if _, cond := tidbbrv1.GetBackupCondition(&b.Status, tidbbrv1.BackupCleanFailed); cond != nil && cond.Message != "" {
+		return cond.Message
+	}
+	return "the clean job failed"
 }
 
 // SyncRestore reconciles a Restore CR into a br.pingcap.com Restore that reads
@@ -428,8 +491,9 @@ func (p *Provider) RestoreWatches() []controller.WatchConfig {
 	}
 }
 
-func cleanPolicyFor(policy backupv1alpha1.BackupDeletionPolicy) tidbbrv1.CleanPolicyType {
-	if policy == backupv1alpha1.BackupDeletionPolicyRetain {
+// cleanPolicyFor is the BR clean policy for backup's deletionPolicy.
+func cleanPolicyFor(c *controller.Context, backup *backupv1alpha1.Backup) tidbbrv1.CleanPolicyType {
+	if c.ShouldRetainBackupData(backup) {
 		return tidbbrv1.CleanPolicyTypeRetain
 	}
 	return tidbbrv1.CleanPolicyTypeDelete
