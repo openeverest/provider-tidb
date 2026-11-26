@@ -1,0 +1,5 @@
+# The external Service is removed once TiDB is in-cluster only again.
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-instance-tidb-external

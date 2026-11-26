@@ -128,6 +128,9 @@ func SyncTiDB(c *controller.Context) error {
 	if err := syncTiProxy(c, providerSpec, owner); err != nil {
 		return err
 	}
+	if err := syncExternalServices(c); err != nil {
+		return err
+	}
 
 	if err := reconcileDataSource(c); err != nil {
 		return err

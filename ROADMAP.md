@@ -143,7 +143,10 @@ Ordered by value/effort; each phase is independently shippable.
   TiProxy, TiDB signs session tokens with a provider-issued certificate under the operator's
   `SessionTokenSigning` feature gate, and TLS and monitoring cover it).
 - **TiCDC** component (`TiCDCGroup`) — change-data-capture.
-- **External access:** map `component.service` → v2 `server`/expose for LoadBalancer/NodePort.
+- **External access:** `component.service` (LoadBalancer / NodePort) on `tidb` or `tiproxy` (done:
+  TiDB Operator v2 keeps its own Services ClusterIP, so the provider adds
+  `<instance>-<tidb|tiproxy>-external` for the MySQL port; the connection details report the
+  LoadBalancer address, or the node port).
 
 ### Phase 4 — Observability & security
 - **Monitoring:** the monitoring contract (`definition/monitoring.yaml`): native metrics endpoints
