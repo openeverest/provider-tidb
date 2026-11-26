@@ -89,6 +89,7 @@ is covered under [Installation](#installation).
 | Version upgrades | ✅ | Change the version bundle; the operator rolls PD → TiFlash → TiKV → TiDB. TiProxy has its own version line. Downgrades are rejected |
 | Monitoring | ✅ | Metrics of PD, TiKV, TiDB, TiFlash and TiProxy sent to the `MonitoringDestination`s in `spec.monitoring.destinations` (see [Monitoring](#monitoring)) |
 | TLS | ✅ | mTLS between components and TLS for MySQL clients (preferred or required), with certificates from cert-manager, your own CA or the provider (see [Security](#security)) |
+| Root password | ✅ | Generated, or your own from the Secret in `spec.userSecretRef`, applied when the cluster is created (see [Your own root password](#your-own-root-password)) |
 | Connection proxy | ✅ | Optional TiProxy: session balancing and connections that survive TiDB restarts and scaling (see [TiProxy](#tiproxy)) |
 
 Stateful components (PD, TiKV, TiFlash) additionally report:
@@ -322,6 +323,42 @@ The provider generates a random `root` password on first bootstrap (via the oper
 ```bash
 mysql -h my-tidb-tidb.<namespace> -P 4000 -u root -p"$(kubectl get secret my-tidb-conn -o jsonpath='{.data.password}' | base64 -d)"
 ```
+
+#### Your own root password
+
+To choose the root password instead, put it under the `password` key of a Secret in the Instance's
+namespace and name that Secret in `spec.userSecretRef`:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata: {name: my-tidb-root-password}
+stringData:
+  password: <your password>
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata: {name: my-tidb}
+spec:
+  providerRef: {name: tidb}
+  userSecretRef: {name: my-tidb-root-password}
+  # ...
+```
+
+The password is applied **only when the cluster is created**: TiDB runs the `bootstrapSQL` once,
+on first bootstrap, and the operator doesn't let it change afterwards. So:
+
+- `spec.userSecretRef` can only be set on a new Instance, and can't be changed or removed later.
+- The provider copies the password into `<instance>-tidb-root` (and the connection Secret) and never
+  reads your Secret again: editing or deleting it later changes nothing. Change the password with
+  `ALTER USER` and update `<instance>-tidb-root` instead.
+- It can't be combined with `spec.dataSource`: the restored data carries the root password of the
+  cluster it was backed up from (see below).
+- The password must not be empty or contain control characters (such as newlines). Until the Secret
+  exists and holds a valid password the provider waits, reporting it in the `Ready` condition.
+
+The UI offers the same as **Root password** under *Database Version*: it creates the Secret
+(labelled `openeverest.io/definition: root`) or lets you pick an existing one.
 
 A BR restore brings back the backed-up cluster's users and grants (`mysql.user` and the other
 privilege tables), root's password included. So the connection Secret keeps working, each backup
@@ -782,11 +819,13 @@ The Instance "orders" is invalid: spec.components[pd].replicas: Invalid value: 2
   provider's rules about the Instance itself: the name length, the required components, an odd
   PD count, valid component versions in TiDB's upgrade order and the TLS settings (mode,
   issuer, DNS-only `additionalNames`; switching TLS on or off, or changing the issuer, of an
-  existing Instance).
+  existing Instance) and where `spec.userSecretRef` may be set (only on a new Instance, not with
+  `spec.dataSource`).
 - **Checked against the running cluster:** changes the live TiDB groups cannot take (a
   downgrade, a TiKV scale-in below PD's `max-replicas`, a TiKV memory limit below the minimum, a
-  smaller volume, turning TLS on or off, a new issuer) and cert-manager's CRDs when
-  `tls.issuer` asks for them. These never block a write: at admission they are
+  smaller volume, turning TLS on or off, a new issuer), cert-manager's CRDs when
+  `tls.issuer` asks for them, and the root password Secret of `spec.userSecretRef` until the
+  cluster has taken its password. These never block a write: at admission they are
   warnings, which `kubectl` prints, and the provider then holds the change back, reporting it in
   the `Instance`'s `Ready` condition with reason `InvalidReference` until it is reverted or the
   CRD is installed.

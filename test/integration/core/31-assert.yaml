@@ -1,0 +1,28 @@
+# The provider copies the user's password into the Instance's root password
+# Secret and the bootstrap SQL the new Cluster runs once.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: root-instance-tidb-root
+  ownerReferences:
+    - apiVersion: core.openeverest.io/v1alpha1
+      kind: Instance
+      name: root-instance
+data:
+  password: cEBzcyd3XHJk
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: root-instance-tidb-bootstrap-sql
+data:
+  bootstrap-sql: |
+    SET PASSWORD FOR 'root'@'%' = 'p@ss\'w\\rd';
+---
+apiVersion: core.pingcap.com/v1alpha1
+kind: Cluster
+metadata:
+  name: root-instance
+spec:
+  bootstrapSQL:
+    name: root-instance-tidb-bootstrap-sql

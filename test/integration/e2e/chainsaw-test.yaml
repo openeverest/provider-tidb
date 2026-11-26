@@ -72,6 +72,13 @@ spec:
 
     - name: sql-connect
       try:
+        # The connection Secret carries the user's root password, which the
+        # sql-client below logs in with.
+        - script:
+            content: |
+              set -e
+              pw=$(kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath='{.data.password}' | base64 -d)
+              [ "$pw" = "e2e'root\\pw" ]
         - apply:
             file: 30-sql-client.yaml
         - assert:

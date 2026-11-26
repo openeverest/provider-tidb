@@ -1,0 +1,8 @@
+# The running Instance keeps its generated root password.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  userSecretRef:
+    name: my-root-password

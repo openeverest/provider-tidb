@@ -18,6 +18,8 @@ definition/
 │   └── br/class.yaml                # The BackupClass the chart ships, and the storage classes it writes to
 ├── components/
 │   └── types.go                     # Component custom spec types
+├── secrets/
+│   └── root/                        # The Secret spec.userSecretRef names: definition.yaml, ui.yaml (create form), types.go (data keys)
 └── topologies/
     └── /
         ├── topology.yaml            # Topology config + UI schema (co-located)
@@ -34,6 +36,9 @@ definition/
 | `components/types.go` | Go structs for component custom specs. | When a component needs custom config. |
 | `topologies/<name>/topology.yaml` | Defines a deployment topology and its UI rendering. | When adding a topology or changing its UI. |
 | `topologies/<name>/types.go` | Go struct for topology-specific custom config. | When a topology needs custom config fields. |
+| `secrets/<name>/definition.yaml` | A kind of Secret the provider reads, e.g. `root` for `spec.userSecretRef`. `parametersSchema.openAPIV3Schema` references the Go type of its data. | When the Secret's keys change. |
+| `secrets/<name>/ui.yaml` | Create form of the Secret, opened from a `secret` field. Paths are keys of the Secret's data. | When the form for creating the Secret changes. |
+| `secrets/<name>/types.go` | Go struct of the Secret's data keys. | When the Secret's keys change. |
 
 ## Adding Components and Topologies
 

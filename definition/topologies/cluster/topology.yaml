@@ -85,6 +85,24 @@ ui:
                 disabled: true
           validation:
             required: true
+        rootSecret:
+          uiType: secret
+          path: spec.userSecretRef.name
+          fieldParams:
+            label: "Root password"
+            definition: root
+            helperText: "Leave empty to generate the password."
+            modes:
+              edit:
+                readOnly: true
+                helperText: "Set when the database is created."
+          # A restore brings back the backed-up cluster's root password.
+          modes:
+            restore:
+              uiType: hidden
+      componentsOrder:
+        - version
+        - rootSecret
     tidb:
       label: "SQL Layer (TiDB)"
       description: "Stateless SQL nodes that speak the MySQL protocol."

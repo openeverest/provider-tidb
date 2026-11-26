@@ -183,6 +183,34 @@ spec:
       type: object
   release:
     version: 0.3.0
+  secrets:
+    root:
+      parametersSchema:
+        openAPIV3Schema:
+          description: RootSecretData is the data of a Secret referenced by spec.userSecretRef.
+          properties:
+            password:
+              description: |-
+                Password is the password the root user gets when the cluster first
+                bootstraps. It must not be empty or contain control characters.
+              type: string
+          required:
+            - password
+          type: object
+      uiSchema:
+        components:
+          password:
+            fieldParams:
+              label: Root password
+              type: password
+            path: password
+            uiType: text
+            validation:
+              required: true
+        componentsOrder:
+          - password
+        description: Password of the root user, set when the database is created.
+        label: Root password
   topologies:
     cluster:
       components:
@@ -292,6 +320,20 @@ spec:
           label: Advanced configuration
         databaseVersion:
           components:
+            rootSecret:
+              fieldParams:
+                definition: root
+                helperText: Leave empty to generate the password.
+                label: Root password
+                modes:
+                  edit:
+                    helperText: Set when the database is created.
+                    readOnly: true
+              modes:
+                restore:
+                  uiType: hidden
+              path: spec.userSecretRef.name
+              uiType: secret
             version:
               fieldParams:
                 label: Database Version
@@ -309,6 +351,9 @@ spec:
               uiType: select
               validation:
                 required: true
+          componentsOrder:
+            - version
+            - rootSecret
           description: Select the TiDB version for this cluster.
           label: Database Version
         pd:

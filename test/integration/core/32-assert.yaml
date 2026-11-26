@@ -1,0 +1,7 @@
+# The user's Secret is not owned by the Instance and outlives it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-root-password
+data:
+  password: cEBzcyd3XHJk

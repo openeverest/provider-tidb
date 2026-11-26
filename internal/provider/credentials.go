@@ -4,7 +4,10 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -66,9 +69,10 @@ func currentSecret(c *controller.Context, ownerUID types.UID, name string) (*cor
 	return nil, controller.WaitFor(fmt.Sprintf("secret %q belongs to a previous %s %q; waiting for it to be removed", name, ref.Kind, ref.Name))
 }
 
-// ensureRootPassword returns the cluster's root password, generating and
-// persisting one in a Secret on first call. The password is generated once and
-// reused across reconciles so it stays stable for the life of the instance.
+// ensureRootPassword returns the cluster's root password, persisting it in a
+// Secret on first call: the one of spec.userSecretRef, or else a generated one.
+// It is chosen once and reused across reconciles so it stays stable for the
+// life of the instance; later changes to the user's Secret are not applied.
 func ensureRootPassword(c *controller.Context) (string, error) {
 	secret, err := currentSecret(c, c.Instance().UID, rootSecretName(c.Name()))
 	if err != nil {
@@ -80,7 +84,7 @@ func ensureRootPassword(c *controller.Context) (string, error) {
 		}
 	}
 
-	password, err := newRootPassword()
+	password, err := initialRootPassword(c)
 	if err != nil {
 		return "", err
 	}
@@ -93,6 +97,41 @@ func ensureRootPassword(c *controller.Context) (string, error) {
 		return "", fmt.Errorf("creating root password secret: %w", err)
 	}
 	return password, nil
+}
+
+// initialRootPassword is the root password a new cluster bootstraps with: the
+// one in the Secret spec.userSecretRef names, or else a generated one.
+func initialRootPassword(c *controller.Context) (string, error) {
+	ref := c.Instance().Spec.UserSecretRef
+	if ref == nil {
+		return newRootPassword()
+	}
+	secret := &corev1.Secret{}
+	if err := c.Get(secret, ref.Name); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", controller.WaitFor(fmt.Sprintf("root password secret %q not found", ref.Name))
+		}
+		return "", fmt.Errorf("get root password secret %q: %w", ref.Name, err)
+	}
+	password := string(secret.Data[rootPasswordKey])
+	if err := checkRootPassword(password); err != nil {
+		return "", fmt.Errorf("root password secret %q: %w", ref.Name, err)
+	}
+	return password, nil
+}
+
+// checkRootPassword rejects a password the bootstrap SQL cannot carry.
+func checkRootPassword(password string) error {
+	if password == "" {
+		return fmt.Errorf("key %q is missing or empty", rootPasswordKey)
+	}
+	if !utf8.ValidString(password) {
+		return fmt.Errorf("key %q is not valid UTF-8", rootPasswordKey)
+	}
+	if strings.IndexFunc(password, unicode.IsControl) >= 0 {
+		return fmt.Errorf("key %q must not contain control characters", rootPasswordKey)
+	}
+	return nil
 }
 
 // readRootPassword returns the stored root password, or empty string if it does
@@ -203,16 +242,20 @@ func adoptRestoredRootPassword(c *controller.Context, restore *backupv1alpha1.Re
 }
 
 // buildBootstrapSQLConfigMap builds the ConfigMap TiDB runs once at first
-// bootstrap to set the root password. The password is alphanumeric, so it needs
-// no SQL escaping.
+// bootstrap to set the root password.
 func buildBootstrapSQLConfigMap(c *controller.Context, password string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		ObjectMeta: c.ObjectMeta(bootstrapConfigMapName(c.Name())),
 		Data: map[string]string{
-			bootstrapSQLConfigKey: fmt.Sprintf("SET PASSWORD FOR '%s'@'%%' = '%s';\n", rootUser, password),
+			bootstrapSQLConfigKey: fmt.Sprintf("SET PASSWORD FOR '%s'@'%%' = '%s';\n", rootUser, sqlEscape(password)),
 		},
 	}
 }
+
+// sqlEscape escapes s for a single-quoted SQL string literal under TiDB's
+// default sql_mode, where a backslash escapes the next character. TiDB parses
+// the bootstrap SQL and exits if it cannot.
+var sqlEscape = strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace
 
 // newRootPassword is a variable so tests can make Sync's output deterministic.
 var newRootPassword = func() (string, error) { return generatePassword(rootPasswordLength) }
