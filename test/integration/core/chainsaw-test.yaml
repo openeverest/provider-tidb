@@ -319,6 +319,35 @@ spec:
             for:
               deletion: {}
 
+    - name: own-root-password
+      try:
+        - apply:
+            file: 31-create-root-instance.yaml
+        - assert:
+            file: 31-assert.yaml
+        # The root password is applied when the cluster bootstraps, so a
+        # running Instance can't take a Secret of its own.
+        - script:
+            content: kubectl patch -n $NAMESPACE instance/test-instance --type merge --patch-file 31-add-user-secret.yaml
+            check:
+              ($error != null): true
+              (contains($stderr, 'spec.userSecretRef')): true
+        - error:
+            file: 31-error.yaml
+        - delete:
+            ref:
+              apiVersion: core.openeverest.io/v1alpha1
+              kind: Instance
+              name: root-instance
+        - wait:
+            apiVersion: core.openeverest.io/v1alpha1
+            kind: Instance
+            name: root-instance
+            for:
+              deletion: {}
+        - assert:
+            file: 32-assert.yaml
+
     - name: delete-instance
       try:
         - delete:

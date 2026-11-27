@@ -57,6 +57,7 @@ func (p *Provider) Validate(in controller.ValidationInput) controller.Validation
 	}
 	errs = append(errs, invalid(componentsPath, validateVersionSpec(instance, spec))...)
 	errs = append(errs, validateTLSParameters(instance, in.Old)...)
+	errs = append(errs, validateUserSecretRef(instance, in.Old)...)
 	serviceErrs, warnings := validateServices(comps)
 	errs = append(errs, serviceErrs...)
 	return controller.ValidationResult{Errors: errs, Warnings: warnings}
@@ -77,6 +78,7 @@ func (p *Provider) ValidateReferences(c *controller.Context) (field.ErrorList, e
 		{tikvPath.Child("resources", "limits", "memory"), validateTiKVMemory},
 		{tlsPath, validateTLS},
 		{componentsPath, validateStorage},
+		{userSecretRefPath.Child("name"), validateRootSecret},
 	} {
 		err := check.run(c)
 		if err == nil {

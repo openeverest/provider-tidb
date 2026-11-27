@@ -1,7 +1,15 @@
 # Instance the real TiDB Operator provisions, on the default version bundle.
 # A single-TiKV cluster keeps one copy of every region, which also lets the
 # scale-in step take TiKV back down to one node. Both kinds of TLS are on, as
-# the UI creates new Instances.
+# the UI creates new Instances. Root gets the password of a Secret of the
+# user's; its quote and backslash must survive the bootstrap SQL.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: e2e-root-password
+stringData:
+  password: 'e2e''root\pw'
+---
 apiVersion: core.openeverest.io/v1alpha1
 kind: Instance
 metadata:
@@ -10,6 +18,8 @@ spec:
   providerRef:
     name: tidb
   version: "8.5.8"
+  userSecretRef:
+    name: e2e-root-password
   parameters:
     tls:
       mode: preferTLS
