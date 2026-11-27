@@ -194,6 +194,14 @@ The chart is self-contained:
   [Validation](#validation). The chart generates the webhook's serving certificate and keeps it
   across upgrades; set `admission.certManager.enabled=true` to have cert-manager issue it, or
   supply one through `admission.certs`.
+- **Its pods meet the restricted Pod Security Standard and OpenShift's `restricted-v2` SCC**: no
+  fixed UIDs or GIDs, and seccomp `RuntimeDefault`. The CRD hook's `kubectl` image runs as root,
+  so outside OpenShift the hook runs as UID 65534; on OpenShift the SCC picks the UID. The chart
+  detects OpenShift from the `security.openshift.io/v1` API, so pass
+  `--api-versions security.openshift.io/v1/SecurityContextConstraints` to `helm template`.
+  On OpenShift the provider also moves TiDB's slow log to an `emptyDir` with TiDB Operator's
+  `slowLog` sidecar, because TiDB can't write it to `/` as a non-root UID; TiDB then rejects
+  `log.slow-query-file` in the component `config`.
 
 Upgrade and uninstall:
 

@@ -218,8 +218,13 @@ install-crds: yq ## Install OpenEverest CRDs (and your operator's CRDs) into the
 		kubectl apply --server-side -f https://github.com/cert-manager/cert-manager/releases/download/$(CERT_MANAGER_VERSION)/cert-manager.yaml && \
 		kubectl -n cert-manager rollout status deploy --timeout=5m; }
 
+.PHONY: provider-namespace
+provider-namespace: ## Create provider-system enforcing the restricted Pod Security Standard, so CI rejects pods that OpenShift wouldn't run.
+	kubectl get namespace provider-system >/dev/null 2>&1 || kubectl create namespace provider-system
+	kubectl label namespace provider-system --overwrite pod-security.kubernetes.io/enforce=restricted
+
 .PHONY: deploy-provider-ci
-deploy-provider-ci: helm-deps ## Deploy the provider via Helm for CI (IMG must already be imported into k3d).
+deploy-provider-ci: helm-deps provider-namespace ## Deploy the provider via Helm for CI (IMG must already be imported into k3d).
 	helm upgrade --install provider-tidb $(CHART_DIR) \
 		--create-namespace \
 		--namespace provider-system \
@@ -234,7 +239,7 @@ deploy-provider-ci: helm-deps ## Deploy the provider via Helm for CI (IMG must a
 	# patching group statuses directly.
 
 .PHONY: deploy-provider-e2e
-deploy-provider-e2e: helm-deps ## Deploy the provider with the bundled TiDB Operator and its CRDs (IMG must already be imported into k3d).
+deploy-provider-e2e: helm-deps provider-namespace ## Deploy the provider with the bundled TiDB Operator and its CRDs (IMG must already be imported into k3d).
 	helm upgrade --install provider-tidb $(CHART_DIR) \
 		--create-namespace \
 		--namespace provider-system \

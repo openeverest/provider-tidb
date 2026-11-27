@@ -117,6 +117,12 @@
     - update
     - watch
 - apiGroups:
+    - cert-manager.io
+  resources:
+    - certificates/finalizers
+  verbs:
+    - update
+- apiGroups:
     - coordination.k8s.io
   resources:
     - leases
@@ -177,6 +183,12 @@
     - patch
     - update
     - watch
+- apiGroups:
+    - core.pingcap.com
+  resources:
+    - clusters/finalizers
+  verbs:
+    - update
 - apiGroups:
     - core.pingcap.com
   resources:

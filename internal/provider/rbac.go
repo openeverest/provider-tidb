@@ -24,6 +24,10 @@ package provider
 // TiDB Operator v2 resources managed by this provider:
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=clusters/status,verbs=get
+// The Cluster owns the component groups and some TLS Secrets with
+// blockOwnerDeletion, which OpenShift's OwnerReferencesPermissionEnforcement
+// admits only with update on the owner's finalizers.
+// +kubebuilder:rbac:groups=core.pingcap.com,resources=clusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=pdgroups,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=pdgroups/status,verbs=get
 // +kubebuilder:rbac:groups=core.pingcap.com,resources=tikvgroups,verbs=get;list;watch;create;update;patch;delete
@@ -68,3 +72,5 @@ package provider
 
 // cert-manager Issuers and Certificates the provider creates when tls.certManager is used.
 // +kubebuilder:rbac:groups=cert-manager.io,resources=issuers;certificates,verbs=get;list;watch;create;update;patch;delete
+// The provider adopts a Certificate's Secret with blockOwnerDeletion (see clusters/finalizers).
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates/finalizers,verbs=update

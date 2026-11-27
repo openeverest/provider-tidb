@@ -109,6 +109,9 @@ func SyncTiDB(c *controller.Context) error {
 
 	tidb := comps[common.ComponentTiDB]
 	tidbGroup := buildTiDBGroup(c, tidb, resolveImage(providerSpec, common.ComponentTiDB, tidb))
+	if err := addOpenShiftSlowLog(c, tidbGroup); err != nil {
+		return err
+	}
 	// The Cluster as applied, not the re-read owner: the cache may not show the new gates yet.
 	if err := addTiDBGracefulWait(c, tidbGroup, cluster, hadSessionTokenSigning); err != nil {
 		return err

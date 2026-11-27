@@ -75,7 +75,14 @@ spec:
       restartPolicy: Never
       securityContext:
         runAsNonRoot: true
+        {{- /* The kubectl image runs as root (USER 0), so runAsNonRoot needs a
+        numeric UID, except on OpenShift: restricted-v2 assigns one from the
+        namespace range and rejects any other. */}}
+        {{- if not (.Capabilities.APIVersions.Has "security.openshift.io/v1/SecurityContextConstraints") }}
         runAsUser: 65534
+        {{- end }}
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: crd-installer
           image: {{ .Values.crds.image }}

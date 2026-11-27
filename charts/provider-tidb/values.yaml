@@ -40,10 +40,12 @@ podAnnotations: {}
 podLabels: {}
 
 podSecurityContext:
-  # -- Run as non-root
+  # -- Run as non-root. The image sets USER 65532; no runAsUser or fsGroup here, so
+  # OpenShift's restricted-v2 SCC can assign IDs from the namespace range.
   runAsNonRoot: true
-  # -- Security context fsGroup
-  fsGroup: 65534
+  # -- Seccomp profile, required by the restricted Pod Security Standard
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   # -- Disallow privilege escalation
@@ -56,8 +58,6 @@ securityContext:
   readOnlyRootFilesystem: true
   # -- Run as non-root user
   runAsNonRoot: true
-  # -- Run as user ID
-  runAsUser: 65534
 
 service:
   # -- Service type
@@ -132,6 +132,16 @@ provider:
 operator:
   # -- Install the bundled TiDB Operator (its CRDs are applied by the operator at startup).
   enabled: true
+  operator:
+    # The upstream chart pins runAsUser 1000 and runAsGroup 2000, which
+    # OpenShift's restricted-v2 SCC rejects. The image sets USER 1000:2000, so
+    # leave the IDs to it.
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: null
+      runAsGroup: null
+      seccompProfile:
+        type: RuntimeDefault
 
 # TiDB Operator CRDs. They are ~15 MB — too large to ship inside the Helm
 # release (Helm stores the whole chart in the release Secret, which would exceed
