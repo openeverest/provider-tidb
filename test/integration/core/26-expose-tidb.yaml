@@ -1,0 +1,15 @@
+# Exposing TiDB's SQL port outside the cluster through a LoadBalancer.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  components:
+    tidb:
+      service:
+        serviceType: LoadBalancer
+        annotations:
+          example.com/owner: chainsaw
+        loadBalancerService:
+          sourceRanges:
+            - 10.0.0.0/8

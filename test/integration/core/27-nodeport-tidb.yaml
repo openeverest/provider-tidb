@@ -1,0 +1,11 @@
+# Switching TiDB's external access to a NodePort.
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: test-instance
+spec:
+  components:
+    tidb:
+      service:
+        serviceType: NodePort
+        loadBalancerService: null

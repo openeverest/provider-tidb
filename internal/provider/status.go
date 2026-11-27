@@ -382,21 +382,17 @@ func stuckContainerReason(message string) string {
 	return ""
 }
 
-// connectionDetails points at the internal (SQL) service clients should use:
+// connectionDetails points at the (SQL) service clients should use:
 // TiProxy's "<group>-tiproxy" on its client port while TiProxy runs, otherwise
-// TiDB's "<group>-tidb" on the MySQL client port.
+// TiDB's "<group>-tidb" on the MySQL client port. When that component is
+// exposed outside the cluster, they point at its external Service instead.
 func connectionDetails(c *controller.Context) controller.ConnectionDetails {
-	host := fmt.Sprintf("%s-tidb.%s", c.Name(), c.Namespace())
-	port := tidbcorev1.DefaultTiDBPortClient
-	if _, ok := enabledTiProxy(c.Instance().Spec.Components); ok {
-		host = fmt.Sprintf("%s-tiproxy.%s", c.Name(), c.Namespace())
-		port = tidbcorev1.DefaultTiProxyPortClient
-	}
+	endpoint := clientEndpoint(c.Instance().Spec.Components)
 	details := controller.ConnectionDetails{
 		Type:     "mysql",
 		Provider: common.ProviderName,
-		Host:     host,
-		Port:     strconv.Itoa(port),
+		Host:     endpoint.internalHost(c),
+		Port:     strconv.Itoa(int(endpoint.port)),
 		Username: rootUser,
 		Password: readRootPassword(c),
 	}
@@ -409,6 +405,7 @@ func connectionDetails(c *controller.Context) controller.ConnectionDetails {
 			details.AdditionalProperties = map[string]string{tlsKeyCA: string(ca)}
 		}
 	}
+	details = withExternalEndpoint(c, endpoint, details)
 	details.URI = connectionURI(details, clientTLS)
 	return details
 }

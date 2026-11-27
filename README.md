@@ -90,6 +90,7 @@ is covered under [Installation](#installation).
 | Monitoring | ✅ | Metrics of PD, TiKV, TiDB, TiFlash and TiProxy sent to the `MonitoringDestination`s in `spec.monitoring.destinations` (see [Monitoring](#monitoring)) |
 | TLS | ✅ | mTLS between components and TLS for MySQL clients (preferred or required), with certificates from cert-manager, your own CA or the provider (see [Security](#security)) |
 | Connection proxy | ✅ | Optional TiProxy: session balancing and connections that survive TiDB restarts and scaling (see [TiProxy](#tiproxy)) |
+| External access | ✅ | `service.serviceType` `LoadBalancer` or `NodePort` on `tidb` or `tiproxy` (see [External access](#external-access)) |
 
 Stateful components (PD, TiKV, TiFlash) additionally report:
 
@@ -331,6 +332,46 @@ therefore has the source's root password; change it with `ALTER USER` and update
 `<instance>-tidb-root` if they should differ. For backups taken by an earlier provider version the
 source Instance's current root password is used, and if that Instance is gone the Restore's message
 says the password is unknown.
+
+### External access
+
+By default TiDB (and TiProxy) are reachable only inside the cluster. To connect from outside, set
+`service` on the component clients connect to: `tiproxy` while [TiProxy](#tiproxy) runs, `tidb`
+otherwise.
+
+```yaml
+spec:
+  components:
+    tidb:
+      service:
+        serviceType: LoadBalancer      # or NodePort; ClusterIP (default) is in-cluster only
+        annotations:                   # optional, copied onto the Service (e.g. cloud LB settings)
+          service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+        loadBalancerService:
+          sourceRanges: [203.0.113.0/24]   # optional client CIDRs allowed through the LoadBalancer
+```
+
+TiDB Operator v2 keeps its own `<instance>-tidb` and `<instance>-tiproxy` Services ClusterIP, so the
+provider adds `<instance>-tidb-external` (or `<instance>-tiproxy-external`) in front of the same
+pods, exposing only the MySQL port (4000, or 6000 for TiProxy). Setting `serviceType` back to
+`ClusterIP`, or turning TiProxy off, removes it.
+
+The connection Secret then reports:
+
+- **LoadBalancer:** `host` is the address the cloud assigned (hostname, else IP) once it is
+  assigned; until then it stays in-cluster.
+- **NodePort:** `host` stays in-cluster, since every node serves the port; `node_port` holds the port
+  to use with any node's address.
+
+Either way `internal_host` and `internal_port` keep the in-cluster endpoint. Exposing `tidb` while
+TiProxy runs is allowed, with a warning: the connection Secret keeps pointing at TiProxy, and
+external clients bypass it.
+
+With [TLS](#security), the certificates name only the in-cluster Services, so clients that verify
+the hostname reject the external address. Add the DNS name they use (the LoadBalancer hostname, or
+your own record pointing at it) to `spec.parameters.tls.additionalNames`; IP addresses can't be
+added. On a running Instance that reissues the certificates and restarts TiDB once you approve the
+maintenance.
 
 ### Backup storages
 
