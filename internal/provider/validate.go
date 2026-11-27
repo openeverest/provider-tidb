@@ -58,7 +58,9 @@ func (p *Provider) Validate(in controller.ValidationInput) controller.Validation
 	errs = append(errs, invalid(componentsPath, validateVersionSpec(instance, spec))...)
 	errs = append(errs, validateTLSParameters(instance, in.Old)...)
 	errs = append(errs, validateUserSecretRef(instance, in.Old)...)
-	return controller.ValidationResult{Errors: errs}
+	serviceErrs, warnings := validateServices(comps)
+	errs = append(errs, serviceErrs...)
+	return controller.ValidationResult{Errors: errs, Warnings: warnings}
 }
 
 // ValidateReferences checks the rules that read the cluster: the operator a

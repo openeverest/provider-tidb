@@ -17,12 +17,14 @@ config:
       defaults:
         replicas: 2
       # Stateless SQL layer: no storage. Declared fields are exactly what Sync
-      # reads off the component spec.
+      # reads off the component spec. service exposes the SQL port outside the
+      # cluster (LoadBalancer or NodePort) through a provider-managed Service.
       supportedFields:
         properties:
           resources: {}
           replicas: {minimum: 1}
           schedulingPolicy: {}
+          service: {}
     tikv:
       defaults:
         replicas: 3
@@ -56,12 +58,14 @@ config:
     tiproxy:
       optional: true
       # Stateless like TiDB: no storage. 0 replicas runs no TiProxy nodes and
-      # clients connect to TiDB directly.
+      # clients connect to TiDB directly. service exposes TiProxy's SQL port
+      # like TiDB's.
       supportedFields:
         properties:
           resources: {}
           replicas: {minimum: 0}
           schedulingPolicy: {}
+          service: {}
 
 ui:
   sections:
@@ -146,9 +150,23 @@ ui:
                   validation:
                     min: 0.5
                     required: true
+            externalAccess:
+              uiType: select
+              path: "spec.components.tidb.service.serviceType"
+              fieldParams:
+                label: "External access"
+                defaultValue: "ClusterIP"
+                options:
+                  - label: "ClusterIP (in-cluster only)"
+                    value: "ClusterIP"
+                  - label: "LoadBalancer"
+                    value: "LoadBalancer"
+                  - label: "NodePort"
+                    value: "NodePort"
           componentsOrder:
             - replicas
             - resources
+            - externalAccess
     tikv:
       label: "Storage Layer (TiKV)"
       description: "Distributed key-value storage nodes."
@@ -339,9 +357,23 @@ ui:
                   validation:
                     min: 0.5
                     required: true
+            externalAccess:
+              uiType: select
+              path: "spec.components.tiproxy.service.serviceType"
+              fieldParams:
+                label: "External access"
+                defaultValue: "ClusterIP"
+                options:
+                  - label: "ClusterIP (in-cluster only)"
+                    value: "ClusterIP"
+                  - label: "LoadBalancer"
+                    value: "LoadBalancer"
+                  - label: "NodePort"
+                    value: "NodePort"
           componentsOrder:
             - replicas
             - resources
+            - externalAccess
     pd:
       label: "Placement Driver (PD)"
       description: "Metadata, timestamp and scheduling nodes. Use an odd number for quorum."

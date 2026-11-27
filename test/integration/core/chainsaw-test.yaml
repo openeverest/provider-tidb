@@ -196,6 +196,60 @@ spec:
         - assert:
             file: 23-assert.yaml
 
+    - name: expose-tidb
+      try:
+        - patch:
+            file: 26-expose-tidb.yaml
+        - assert:
+            file: 26-assert.yaml
+        # servicelb is off in this cluster, so simulate the cloud assigning the
+        # LoadBalancer address. The connection details then point at it, and
+        # keep the in-cluster endpoint under internal_host.
+        - script:
+            content: |
+              set -e
+              kubectl -n $NAMESPACE patch service/test-instance-tidb-external --subresource status --type merge \
+                -p '{"status":{"loadBalancer":{"ingress":[{"ip":"192.0.2.10"}]}}}'
+              conn() { kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath="{.data.$1}" | base64 -d; }
+              for i in $(seq 60); do
+                [ "$(conn host)" = "192.0.2.10" ] && break
+                sleep 2
+              done
+              test "$(conn host)" = "192.0.2.10" || { echo "host is $(conn host), want 192.0.2.10"; exit 1; }
+              test "$(conn port)" = "4000"
+              test "$(conn internal_host)" = "test-instance-tidb.$NAMESPACE"
+        - patch:
+            file: 27-nodeport-tidb.yaml
+        - assert:
+            file: 27-assert.yaml
+        # With a NodePort, clients pick a node address themselves: the host
+        # stays in-cluster and node_port carries the port to use.
+        - script:
+            content: |
+              set -e
+              want=$(kubectl -n $NAMESPACE get service/test-instance-tidb-external -o jsonpath='{.spec.ports[0].nodePort}')
+              conn() { kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath="{.data.$1}" | base64 -d; }
+              for i in $(seq 60); do
+                [ "$(conn node_port)" = "$want" ] && break
+                sleep 2
+              done
+              test "$(conn node_port)" = "$want" || { echo "node_port is $(conn node_port), want $want"; exit 1; }
+              test "$(conn host)" = "test-instance-tidb.$NAMESPACE"
+        - patch:
+            file: 28-unexpose-tidb.yaml
+        - error:
+            file: 28-error.yaml
+        - script:
+            content: |
+              set -e
+              conn() { kubectl -n $NAMESPACE get secret test-instance-conn -o jsonpath="{.data.$1}" | base64 -d; }
+              for i in $(seq 60); do
+                [ -z "$(conn internal_host)" ] && break
+                sleep 2
+              done
+              test -z "$(conn internal_host)" || { echo "connection secret still has internal_host"; exit 1; }
+              test "$(conn host)" = "test-instance-tidb.$NAMESPACE"
+
     - name: disabling-tls-rejected
       try:
         # The operator can't switch TLS on a running cluster, so admission

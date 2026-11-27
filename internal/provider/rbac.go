@@ -16,6 +16,8 @@ package provider
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // The provider creates a bootstrap-sql ConfigMap that sets the root password.
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// The provider exposes TiDB or TiProxy outside the cluster with its own Service.
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // The runtime counts the pods labelled via Context.PodLabels into status.components.
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 

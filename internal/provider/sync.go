@@ -128,6 +128,10 @@ func SyncTiDB(c *controller.Context) error {
 	if err := syncTiProxy(c, providerSpec, owner); err != nil {
 		return err
 	}
+	servicesPending, err := syncExternalServices(c)
+	if err != nil {
+		return err
+	}
 
 	if err := reconcileDataSource(c); err != nil {
 		return err
@@ -140,6 +144,9 @@ func SyncTiDB(c *controller.Context) error {
 	}
 	if tlsNamesPending {
 		return controller.WaitFor("waiting for cert-manager to reissue TiDB's MySQL certificate with the additional names")
+	}
+	if servicesPending {
+		return controller.WaitFor("waiting for the LoadBalancer Service to be deleted before creating it again as NodePort")
 	}
 	// Checked last: the error only flags the backup configuration, so the engine is fully synced first.
 	return validateBackupSchedules(c.Instance().Spec.Backup)

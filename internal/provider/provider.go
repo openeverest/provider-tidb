@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -57,6 +58,8 @@ func New() *Provider {
 			},
 			WatchConfigs: []controller.WatchConfig{
 				controller.WatchOwned(&tidbcorev1.Cluster{}),
+				// The external SQL Services: their LoadBalancer address goes into the connection details.
+				controller.WatchOwned(&corev1.Service{}),
 				// The component groups are owned by the Cluster (not the Instance),
 				// so map them back to the Instance by name (group name == Instance name).
 				controller.WatchExternal(&tidbcorev1.PDGroup{}, handler.EnqueueRequestsFromMapFunc(instanceForGroup)),

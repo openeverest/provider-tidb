@@ -1,0 +1,20 @@
+# The provider adds a LoadBalancer Service in front of the TiDB pods, next to
+# the operator's ClusterIP one, exposing only the MySQL client port.
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-instance-tidb-external
+  annotations:
+    example.com/owner: chainsaw
+spec:
+  type: LoadBalancer
+  loadBalancerSourceRanges:
+    - 10.0.0.0/8
+  selector:
+    pingcap.com/component: tidb
+    pingcap.com/cluster: test-instance
+    pingcap.com/group: test-instance
+  ports:
+    - name: mysql-client
+      port: 4000
+      targetPort: mysql-client
